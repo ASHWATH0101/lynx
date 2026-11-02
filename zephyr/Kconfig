@@ -1,0 +1,60 @@
+menuconfig LYNX
+    bool "LYNX variable sync protocol"
+    help
+      Zero-allocation variable sync between MCUs (COBS + CRC-16 frames,
+      reliable writes with ACK/retry, batch writes, reads, bus mode).
+
+if LYNX
+
+config LYNX_MAX_VARS
+    int "Maximum number of variables per handle"
+    range 1 32
+    default 32
+
+config LYNX_MAX_PAYLOAD
+    int "Maximum payload bytes per frame"
+    range 1 248
+    default 64
+    help
+      Sizes the RX, TX and reply buffers inside lx_t. A batch write
+      needs 2 bytes per variable plus the variable sizes.
+
+config LYNX_TIMEOUT_MS
+    int "ACK / read-response timeout (ms)"
+    range 1 60000
+    default 20
+
+config LYNX_RETRIES
+    int "Automatic retransmissions"
+    range 0 255
+    default 3
+
+config LYNX_LEAD_DELIM
+    bool "Send a 0x00 before every frame"
+    help
+      +1 byte per frame, but line noise can never swallow the start of
+      the next frame.
+
+config LYNX_BUS
+    bool "Multi-drop bus mode (node addresses, broadcast)"
+    help
+      Adds [DST][SRC] after the header byte. Every node on the bus
+      needs a unique address set with lx_set_addr().
+
+config LYNX_ISR_SAFE
+    bool "ISR-safe receive (lx_rx only queues, lx_poll decodes)"
+    help
+      lx_rx() / lx_rx_buf() just append to a lock-free queue and can be
+      called from any ISR; call lx_poll() from the thread that also calls
+      lx_tick/lx_write. Replies and events then all happen in that thread.
+
+config LYNX_RXQ_SIZE
+    int "Receive queue size in bytes (power of two)"
+    depends on LYNX_ISR_SAFE
+    range 2 256
+    default 128
+    help
+      Must hold everything that arrives between two lx_poll() calls:
+      at 921600 baud that is 92 bytes per millisecond.
+
+endif # LYNX

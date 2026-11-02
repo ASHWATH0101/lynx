@@ -1,0 +1,41 @@
+menu "LYNX benchmark"
+
+    choice BENCH_ROLE
+        prompt "Role of this board"
+        default BENCH_ROLE_INITIATOR
+
+        config BENCH_ROLE_INITIATOR
+            bool "Initiator (drives the test, prints the table)"
+        config BENCH_ROLE_RESPONDER
+            bool "Responder"
+    endchoice
+
+    config BENCH_BAUD_LOW
+        int "First baud rate"
+        default 115200
+
+    config BENCH_BAUD_HIGH
+        int "Second baud rate"
+        default 2000000
+
+    config BENCH_TX_GPIO
+        int "Link UART TX GPIO"
+        default 4 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6
+        default 17
+
+    config BENCH_RX_GPIO
+        int "Link UART RX GPIO"
+        default 5 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6
+        default 18 if IDF_TARGET_ESP32S3
+        default 16
+
+    config BENCH_BAVA_BAREMETAL
+        bool "Build BAVA without its ESP-IDF integration"
+        default n
+        help
+            Only matters when built with BAVA_DIR. By default BAVA is built
+            the way an ESP-IDF user gets it (its FreeRTOS mutex and spinlock
+            path). Enable to measure its bare-metal path instead, as the host
+            benchmark and the size report do.
+
+endmenu

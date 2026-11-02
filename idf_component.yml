@@ -1,0 +1,19 @@
+version: "0.1.0"
+description: "LYNX: zero-allocation variable sync between MCUs over UART/SPI/BLE/Wi-Fi (COBS + CRC-16, ACK/retry, batch, bus mode)"
+license: "MIT"
+tags:
+  - protocol
+  - uart
+  - serial
+  - sync
+dependencies:
+  idf: ">=5.0"
+files:
+  exclude:
+    - "test/**/*"
+    - "tools/**/*"
+    - "docs/**/*"
+    - ".github/**/*"
+    - "zephyr/**/*"
+    - "port/zephyr/**/*"
+    - "examples/**/*"

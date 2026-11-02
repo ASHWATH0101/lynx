@@ -1,0 +1,9 @@
+source "Kconfig.zephyr"
+
+config APP_LYNX_NODE
+    int "Node number (0 or 1)"
+    range 0 1
+    default 0
+    help
+      Flash one board with 0 and the other with 1. Node 0 also sends a
+      reliable setpoint write every second.

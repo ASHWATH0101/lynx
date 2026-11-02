@@ -1,0 +1,26 @@
+menu "LYNX UART example"
+
+    config EXAMPLE_NODE
+        int "Node number (0 or 1)"
+        range 0 1
+        default 0
+        help
+            Flash one board with 0 and the other with 1. Node 0 also sends
+            a reliable setpoint write every second.
+
+    config EXAMPLE_BAUD
+        int "Link baud rate"
+        default 115200
+
+    config EXAMPLE_TX_GPIO
+        int "Link UART TX GPIO"
+        default 4 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6
+        default 17
+
+    config EXAMPLE_RX_GPIO
+        int "Link UART RX GPIO"
+        default 5 if IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C6
+        default 18 if IDF_TARGET_ESP32S3
+        default 16
+
+endmenu

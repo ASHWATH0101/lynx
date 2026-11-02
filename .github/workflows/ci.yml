@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.cc }}, ASan+UBSan+TSan)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      # Sanitizer runtimes need the smaller mmap randomisation of older kernels.
+      - run: sudo sysctl vm.mmap_rnd_bits=28
+      - if: matrix.cc == 'clang'
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Unit tests, every build configuration, thread stress, benchmark simulation
+        run: CC=${{ matrix.cc }} tools/run_tests.sh
+
+  size:
+    name: Cross-compile size check
+    runs-on: ubuntu-24.04
+    env:
+      ESP_TC: esp-16.1.0_20260609
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Espressif toolchains (cached)
+        id: esp-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/esp-tc
+          key: ${{ env.ESP_TC }}
+      - if: steps.esp-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/esp-tc && cd ~/esp-tc
+          V=${ESP_TC#esp-}
+          for t in xtensa-esp-elf riscv32-esp-elf; do
+            curl -fsSL "https://github.com/espressif/crosstool-NG/releases/download/$ESP_TC/$t-$V-x86_64-linux-gnu.tar.xz" | tar xJ
+          done
+      - run: |
+          echo "$HOME/esp-tc/xtensa-esp-elf/bin" >> "$GITHUB_PATH"
+          echo "$HOME/esp-tc/riscv32-esp-elf/bin" >> "$GITHUB_PATH"
+      - name: Sizes (fails if Cortex-M3 .text grows past the budget)
+        run: |
+          {
+            echo '## lynx.o sizes'
+            for cfg in "" "-DLX_BUS=1" "-DLX_ISR_SAFE=1"; do
+              echo; echo "### ${cfg:-default}"
+              LX_BUDGET_CM3=2200 tools/size_report.sh $cfg
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  arduino:
+    name: Arduino (${{ matrix.fqbn }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fqbn: arduino:avr:uno
+            platforms: |
+              - name: arduino:avr
+          - fqbn: arduino:avr:mega
+            platforms: |
+              - name: arduino:avr
+          - fqbn: esp32:esp32:esp32
+            platforms: |
+              - name: esp32:esp32
+                source-url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/compile-sketches@v1
+        with:
+          fqbn: ${{ matrix.fqbn }}
+          platforms: ${{ matrix.platforms }}
+          libraries: |
+            - source-path: ./
+          sketch-paths: |
+            - examples
+
+  esp-idf:
+    name: ESP-IDF ${{ matrix.idf }} (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        idf: [v5.4]
+        target: [esp32, esp32s3, esp32c3]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Example (component + FreeRTOS RX task)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ matrix.idf }}
+          target: ${{ matrix.target }}
+          path: extras/esp-idf/uart_sync
+      - name: On-target benchmark firmware (LYNX only)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ matrix.idf }}
+          target: ${{ matrix.target }}
+          path: extras/bench/esp-idf
+
+  zephyr:
+    name: Zephyr sample (qemu_cortex_m3)
+    runs-on: ubuntu-24.04
+    container: ghcr.io/zephyrproject-rtos/ci:v0.27.4
+    env:
+      CMAKE_PREFIX_PATH: /opt/toolchains
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lynx
+      - name: West workspace (Zephyr core + CMSIS only)
+        run: |
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.1.0 zws
+          cd zws
+          west config manifest.project-filter -- '-.*,+cmsis,+cmsis_6'
+          west update --narrow -o=--depth=1
+      - name: Build
+        working-directory: zws
+        run: west build -b qemu_cortex_m3 ../lynx/extras/zephyr/uart_sync
+
+  compare-bava:
+    # Optional: builds BAVA (GPLv3, github.com/NishanthRaj707/bavaprotocol) from
+    # source as a black box for the size and speed comparison. Nothing from it
+    # is stored in this repository. Allowed to fail if BAVA changes upstream.
+    name: Comparison with BAVA (informational)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo sysctl vm.mmap_rnd_bits=28
+      - run: git clone --depth 1 https://github.com/NishanthRaj707/bavaprotocol "$RUNNER_TEMP/bava"
+      - run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Sizes, host benchmark, benchmark-harness simulation with BAVA
+        env:
+          BAVA_DIR: ${{ runner.temp }}/bava
+        run: |
+          {
+            echo '## LYNX vs BAVA (object sizes)'; tools/size_report.sh
+            echo; echo '## Host benchmark'; echo '```'
+            gcc -std=c99 -O2 -I. -I"$BAVA_DIR/include" lynx.c "$BAVA_DIR"/src/*.c test/bench_vs_bava.c -o bench
+            ./bench
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          tools/run_tests.sh

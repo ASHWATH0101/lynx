@@ -1,0 +1,11 @@
+/* native_sim: the second UART is a host pseudo-terminal (printed at start-up).
+ * Connect two instances with e.g. `socat /dev/pts/X /dev/pts/Y`. */
+/ {
+	aliases {
+		lynx-uart = &uart1;
+	};
+};
+
+&uart1 {
+	status = "okay";
+};

@@ -1,0 +1,7 @@
+# Same compiler settings for LYNX and BAVA: optimise for speed.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_FREERTOS_HZ=1000
+# The bench task busy-polls the link UART on purpose.
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_UART_ISR_IN_IRAM=y

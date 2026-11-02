@@ -217,9 +217,9 @@ targets, RAM and caveats):
 
 | | Cortex-M3 | ESP32 | ESP32-C3 |
 |---|---:|---:|---:|
-| LYNX | 2100 | 2613 | 2822 |
-| LYNX `LX_BUS=1` | 2432 | 2989 | 3162 |
-| LYNX `LX_ISR_SAFE=1` | 2288 | 2825 | 3066 |
+| LYNX | 2056 | 2633 | 2858 |
+| LYNX `LX_BUS=1` | 2430 | 3016 | 3238 |
+| LYNX `LX_ISR_SAFE=1` | 2244 | 2846 | 3098 |
 | BAVA (always includes bus mode) | 2086 | 2730 | 2588 |
 | RAM: `sizeof(lx_t)` / `sizeof(bava_handle_t)` | 528 / 556 | 528 / 560 | 528 / 560 |
 

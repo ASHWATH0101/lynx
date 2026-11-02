@@ -7,18 +7,19 @@ LYNX is built `-std=c99 -Wall -Wextra -Werror -Wconversion`. Both at
 static RAM, all state lives in the handle.
 
 Toolchains: arm-none-eabi-gcc 14.2.1, xtensa/riscv32-esp-elf-gcc 16.1.0 (esp-16.1.0_20260609),
-host gcc 15.2. BAVA at commit `b13ba07` (2026-11-01). Measured 2026-11-02 on LYNX 0.1.0.
+host gcc 15.2. BAVA at commit `b13ba07` (2026-11-01). Measured 2026-11-02 on LYNX 0.1.0; LYNX
+columns re-measured 2026-11-03 after the `p_cmd` race fix (see CHANGELOG).
 
 ## Default build (LYNX `LX_MAX_PAYLOAD=64`, BAVA `BAVA_MAX_PAYLOAD=32`)
 
 | Target | LYNX .text | sizeof(lx_t) | BAVA .text | sizeof(bava_handle_t) |
 |---|---:|---:|---:|---:|
-| x86-64 host | 3908 | 800 | 4283 | 968 |
-| Cortex-M3 | 2100 | 528 | 2086 | 556 |
-| Cortex-M0+ | 2296 | 528 | 2296 | 556 |
-| ESP32 (Xtensa LX6) | 2613 | 528 | 2730 | 560 |
-| ESP32-S3 (Xtensa LX7) | 2617 | 528 | 2722 | 560 |
-| ESP32-C3 (RV32IMC) | 2822 | 528 | 2588 | 560 |
+| x86-64 host | 3861 | 800 | 4283 | 968 |
+| Cortex-M3 | 2056 | 528 | 2086 | 556 |
+| Cortex-M0+ | 2246 | 528 | 2296 | 556 |
+| ESP32 (Xtensa LX6) | 2633 | 528 | 2730 | 560 |
+| ESP32-S3 (Xtensa LX7) | 2637 | 528 | 2722 | 560 |
+| ESP32-C3 (RV32IMC) | 2858 | 528 | 2588 | 560 |
 
 At equal payload (`-DLX_MAX_PAYLOAD=32u`) LYNX code is the same and `sizeof(lx_t)` drops to
 **432 B** on 32-bit MCUs (704 B on x86-64), against 556–560 B for BAVA.
@@ -29,12 +30,12 @@ BAVA always includes its bus mode, so the bus row is the like-for-like compariso
 
 | Target | LYNX bus | sizeof | LYNX ISR-safe | sizeof | BAVA |
 |---|---:|---:|---:|---:|---:|
-| x86-64 host | 4539 | 808 | 4135 | 952 | 4283 |
-| Cortex-M3 | 2432 | 540 | 2288 | 680 | 2086 |
-| Cortex-M0+ | 2660 | 540 | 2524 | 680 | 2296 |
-| ESP32 (Xtensa LX6) | 2989 | 540 | 2825 | 680 | 2730 |
-| ESP32-S3 (Xtensa LX7) | 2993 | 540 | 2830 | 680 | 2722 |
-| ESP32-C3 (RV32IMC) | 3162 | 540 | 3066 | 680 | 2588 |
+| x86-64 host | 4484 | 808 | 4088 | 952 | 4283 |
+| Cortex-M3 | 2430 | 540 | 2244 | 680 | 2086 |
+| Cortex-M0+ | 2648 | 540 | 2474 | 680 | 2296 |
+| ESP32 (Xtensa LX6) | 3016 | 540 | 2846 | 680 | 2730 |
+| ESP32-S3 (Xtensa LX7) | 3020 | 540 | 2850 | 680 | 2722 |
+| ESP32-C3 (RV32IMC) | 3238 | 540 | 3098 | 680 | 2588 |
 
 The ISR-safe handle includes the 128-byte receive queue and its 16-byte gap bitmap.
 
@@ -46,6 +47,7 @@ The ISR-safe handle includes the 128-byte receive queue and its 16-byte gap bitm
 | `ctz` fallback on cores without CLZ (no effect on M3; see below) | 1810 |
 | `lx_get` / `lx_set` (dropped by `--gc-sections` when unused) | 1898 |
 | Concurrency hardening | 2100 |
+| `p_cmd` race fix (one atomic load per check instead of up to three volatile loads) | 2056 |
 
 Hardening (+202 B on M3): ~100 B in the RX decoder (answers are matched and the transaction
 closed under the lock, event delivered before the handle goes idle, NACK reasons validated),

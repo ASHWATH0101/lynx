@@ -91,10 +91,10 @@ extern "C" {
 #error "LX_RXQ_SIZE must be a power of two in 2..256"
 #endif
 
-/* Byte hand-over between contexts: p_cmd (read without the lock by lx_busy
- * and lx_tick) and the LX_ISR_SAFE queue indices. Acquire/release, so that
- * once lx_busy() reads false everything the event callback did is visible.
- * Override for compilers without the GNU __atomic builtins. */
+/* Byte hand-over between contexts: p_cmd (every access, as finish() clears
+ * it outside the lock) and the LX_ISR_SAFE queue indices. Acquire/release,
+ * so that once lx_busy() reads false everything the event callback did is
+ * visible. Override for compilers without the GNU __atomic builtins. */
 #ifndef LX_LOAD8
 #if defined(__GNUC__)
 #define LX_LOAD8(p)      __atomic_load_n((p), __ATOMIC_ACQUIRE)

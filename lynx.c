@@ -230,7 +230,8 @@ static int start_txn(lx_t *h, uint8_t cmd, uint32_t mask BUS_P)
 {
     uint8_t seq = h->seq = (uint8_t)((h->seq + 1u) & 0x0Fu);
     LX_ENTER_CRITICAL();
-    if (h->p_cmd && !(LX_ONE_CONTEXT && h->p_cmd == P_CLOSING)) { LX_EXIT_CRITICAL(); return LX_ERR_BUSY; }
+    uint8_t cur = LX_LOAD8(&h->p_cmd);   /* finish() clears it outside the lock */
+    if (cur && !(LX_ONE_CONTEXT && cur == P_CLOSING)) { LX_EXIT_CRITICAL(); return LX_ERR_BUSY; }
     LX_STORE8(&h->p_cmd, cmd); h->p_mask = mask; h->p_seq = seq;
 #if LX_BUS
     h->p_dst = dst;
@@ -328,7 +329,8 @@ static bool answers(const lx_t *h, uint8_t cmd, uint8_t seq, uint8_t from)
 #else
     (void)from;
 #endif
-    return h->p_cmd && h->p_cmd != P_CLOSING && (!cmd || h->p_cmd == cmd) && seq == h->p_seq;
+    uint8_t cur = LX_LOAD8(&h->p_cmd);
+    return cur && cur != P_CLOSING && (!cmd || cur == cmd) && seq == h->p_seq;
 }
 
 /* Close the transaction in flight if the answer belongs to it (cmd 0 = any).
@@ -358,12 +360,13 @@ void lx_tick(lx_t *h, uint32_t now_ms)
     uint8_t dst = 0;
 #endif
     LX_ENTER_CRITICAL();
-    if (h->p_cmd && h->p_cmd != P_CLOSING && (int32_t)(now_ms - h->deadline) >= 0) {
+    uint8_t cur = LX_LOAD8(&h->p_cmd);
+    if (cur && cur != P_CLOSING && (int32_t)(now_ms - h->deadline) >= 0) {
         mask = h->p_mask;
         if (h->p_tries >= LX_RETRIES) {
             LX_STORE8(&h->p_cmd, P_CLOSING); give_up = true;
         } else {
-            cmd = h->p_cmd; seq = h->p_seq;
+            cmd = cur; seq = h->p_seq;
 #if LX_BUS
             dst = h->p_dst;
 #endif
@@ -460,7 +463,7 @@ static void on_frame(lx_t *h, const uint8_t *f, uint8_t n)
         bool won = false;
         err = check_var(h, id, plen);
         LX_ENTER_CRITICAL();
-        if (answers(h, CMD_READ, seq, src) && LX_BIT(id) == h->p_mask) {
+        if (answers(h, CMD_READ, seq, src) && id < LX_MAX_VARS && LX_BIT(id) == h->p_mask) {
             if (!err) commit(h, id, p);
             mask = h->p_mask; LX_STORE8(&h->p_cmd, P_CLOSING); won = true;
         }

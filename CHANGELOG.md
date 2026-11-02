@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Data race on `p_cmd`**: `finish()` clears it with an atomic store outside the lock, but
+  `lx_tick`, `start_txn` and the answer matcher read it with plain loads under the lock.
+  ThreadSanitizer caught it in roughly 1 run in 20 of the locked-RX thread test (the CI runs
+  happened to pass). Every access to `p_cmd` now goes through `LX_LOAD8`/`LX_STORE8`.
+- **Shift past 31 on a bad `READ_RSP`**: a CRC-valid read response with an id of 32 or more,
+  arriving while a read was in flight, evaluated `LX_BIT(id)` (undefined behaviour). On x86 the
+  shift wraps, so id 34 matched a read of id 2 and ended it with `LX_EV_NACK_ID`. Such responses
+  are now ignored. New test [21].
+
+Code size (`-Os`): Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead of
+up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences). Bus and ISR-safe builds move
+the same way.
+
 ## 0.1.0 — 2026-11-02
 
 First packaged release. Wire format unchanged from the handed-over sources for point-to-point

@@ -288,6 +288,17 @@ int main(void) {
         CHECK(b_f == (LX_ONE_CONTEXT ? 7.5f : 0.0f));      /* the chained write landed */
     }
 
+    puts("[21] a READ_RSP with an id past 31 is ignored (no shift overflow, no match on id mod 32)");
+    {
+        uint8_t f[16]; size_t n; int32_t v = 1234;
+        setup(); lx_tick(&A, 0); a2b.drop_next = 1; a_i = 0;   /* request lost: B stays silent */
+        CHECK(lx_read(&A, 2) == LX_OK); pump();
+        n = head_b2a(f, 6, A.p_seq, 32 + 2); memcpy(f + n, &v, 4); n += 4; inject(&b2a, f, n); pump();
+        CHECK(lx_busy(&A) && ev_count == 0 && a_i == 0);
+        n = head_b2a(f, 6, A.p_seq, 2); memcpy(f + n, &v, 4); n += 4; inject(&b2a, f, n); pump();
+        CHECK(!lx_busy(&A) && ev_count == 1 && last_ev == LX_EV_DONE && a_i == 1234);
+    }
+
 #if defined(LX_PORT) && !LX_ISR_SAFE
     puts("[18] races: an answer lands the instant lx_tick leaves its critical section");
     {

@@ -57,5 +57,6 @@ Do not weaken any existing test. Keep zero heap, O(1) per byte, C99.
 - NOT verified: real ESP-IDF and Zephyr builds (no SDK installed: disk space), the CI workflow
   (never run on GitHub), and no on-target benchmark numbers (no hardware). Expect to fix small
   things in .github/workflows/ci.yml on its first run.
-- Placeholders to fill: `url=` in library.properties (GitHub URL), CI badge in README.
+- Published at https://github.com/ASHWATH0101/lynx (public). Commits use the GitHub noreply
+  address (repo-local git config), never the personal email.
 - Bus mode costs nothing when off: verified byte-identical disassembly when it was added.

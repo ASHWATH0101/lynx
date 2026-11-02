@@ -1,5 +1,8 @@
 # LYNX
 
+[![CI](https://github.com/ASHWATH0101/lynx/actions/workflows/ci.yml/badge.svg)](https://github.com/ASHWATH0101/lynx/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Zero-allocation variable sync between microcontrollers, over any byte link (UART, RS-485, SPI,
 BLE, Wi-Fi). Bind variables to ids on both ends; LYNX keeps them in sync.
 

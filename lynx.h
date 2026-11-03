@@ -45,7 +45,7 @@ extern "C" {
                                    eat the next frame. 0 = lose at most one. */
 #endif
 #ifndef LX_RETRIES
-#define LX_RETRIES      3u      /* automatic retransmissions */
+#define LX_RETRIES      3u      /* automatic retransmissions, <= 255 */
 #endif
 #ifndef LX_BUS
 #define LX_BUS          0       /* 1 = multi-drop bus: +2 address bytes/frame,
@@ -83,6 +83,9 @@ extern "C" {
 #endif
 #if LX_MAX_PAYLOAD > 250u
 #error "LX_MAX_PAYLOAD must be <= 250"
+#endif
+#if LX_RETRIES > 255u
+#error "LX_RETRIES must be <= 255"
 #endif
 #if LX_BUS && LX_MAX_PAYLOAD > 248u
 #error "LX_MAX_PAYLOAD must be <= 248 with LX_BUS"

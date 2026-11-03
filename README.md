@@ -138,7 +138,7 @@ Compile-time options; set with `-D`, or through Kconfig on ESP-IDF and Zephyr.
 | `LX_MAX_VARS` | 32 | variables per handle, ≤ 32 |
 | `LX_MAX_PAYLOAD` | 64 | bytes per frame, ≤ 250 (≤ 248 with `LX_BUS`); sizes the three frame buffers in `lx_t` |
 | `LX_TIMEOUT_MS` | 20 | wait for ACK / read response |
-| `LX_RETRIES` | 3 | retransmissions before `LX_EV_TIMEOUT` |
+| `LX_RETRIES` | 3 | retransmissions before `LX_EV_TIMEOUT`, ≤ 255 |
 | `LX_LEAD_DELIM` | 0 | also send `0x00` before each frame |
 | `LX_BUS` | 0 | multi-drop bus mode; 0 compiles the bus code out entirely |
 | `LX_ISR_SAFE` | 0 | `lx_rx` only queues; `lx_poll` decodes |

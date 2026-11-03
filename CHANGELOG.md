@@ -22,6 +22,10 @@
   default `LX_MAX_PAYLOAD`, more with several or larger variables, up to past the end of the
   handle). `lx_bind` now returns `LX_ERR_BUSY` for an id that is part of the transaction in
   flight. New test [22].
+- **`LX_RETRIES` above 255 never timed out**: the retry counter is 8 bits, so the transaction
+  was retransmitted forever, no event came and `lx_busy()` stayed true. Such values are now a
+  compile-time error like the other invalid options, and `tools/run_tests.sh` checks that every
+  invalid configuration is rejected.
 
 Code size (`-Os`): Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead of
 up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences). Bus and ISR-safe builds move

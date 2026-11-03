@@ -41,6 +41,24 @@ for cfg in "${CONFIGS[@]}"; do
 done
 echo "ALL CONFIGS PASSED"
 
+# Configurations lynx.h must reject with an #error instead of building something broken.
+BAD=(
+  "-DLX_MAX_VARS=33u"
+  "-DLX_MAX_PAYLOAD=251u"
+  "-DLX_BUS=1 -DLX_MAX_PAYLOAD=249u"
+  "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=100u"
+  "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=512u"
+  "-DLX_RETRIES=256u"                         # p_tries is 8 bits: would never time out
+)
+for cfg in "${BAD[@]}"; do
+  # shellcheck disable=SC2086
+  if "$CC" -std=c99 $cfg -I"$ROOT" -c "$ROOT/lynx.c" -o "$OUT/bad.o" 2> "$OUT/err"; then
+    echo "FAILED: $cfg compiled"; exit 1
+  fi
+  grep -q "must be" "$OUT/err" || { cat "$OUT/err"; echo "FAILED: $cfg not rejected by its #error"; exit 1; }
+done
+echo "invalid configs rejected: ${#BAD[@]}"
+
 # Real threads under ThreadSanitizer: RX path and app path of one node in
 # different threads, lossy link, short timeouts (test/test_threads.c).
 TSAN="-std=c99 -O1 -g -Wall -Wextra -Werror -fsanitize=thread -pthread -DLX_TIMEOUT_MS=2u"

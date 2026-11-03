@@ -120,10 +120,8 @@ static inline void enc_hdr(enc_t *e, const lx_t *h, uint8_t hdr BUS_P)
 #endif
 }
 
-static inline bool is_bound(const lx_t *h, uint8_t id)
-{
-    return id < LX_MAX_VARS && (h->bound & LX_BIT(id));    /* range first: no shift past 31 */
-}
+/* id is in range (checked first: no shift past 31) and bound */
+#define IS_BOUND(h, id)  ((id) < LX_MAX_VARS && ((h)->bound & LX_BIT(id)))
 
 /* Validate mask, return payload bytes needed (or <0 error). A single
  * variable always fits: lx_bind caps it at LX_MAX_PAYLOAD. */
@@ -209,7 +207,7 @@ uint32_t lx_take_updates(lx_t *h)
 
 int lx_get(lx_t *h, uint8_t id, void *out)
 {
-    if (!is_bound(h, id)) return LX_ERR_ID;
+    if (!IS_BOUND(h, id)) return LX_ERR_ID;
     LX_ENTER_CRITICAL();
     memcpy(out, h->vars[id].ptr, h->vars[id].size);
     LX_EXIT_CRITICAL();
@@ -218,7 +216,7 @@ int lx_get(lx_t *h, uint8_t id, void *out)
 
 int lx_set(lx_t *h, uint8_t id, const void *in)
 {
-    if (!is_bound(h, id)) return LX_ERR_ID;
+    if (!IS_BOUND(h, id)) return LX_ERR_ID;
     LX_ENTER_CRITICAL();
     memcpy(h->vars[id].ptr, in, h->vars[id].size);
     LX_EXIT_CRITICAL();
@@ -279,7 +277,7 @@ static int do_write(lx_t *h, uint32_t mask BUS_P)
 
 static int do_read(lx_t *h, uint8_t id BUS_P)
 {
-    if (!is_bound(h, id)) return LX_ERR_ID;
+    if (!IS_BOUND(h, id)) return LX_ERR_ID;
     int seq = start_txn(h, CMD_READ, LX_BIT(id) BUS_A(dst));
     if (seq < 0) return seq;
     transmit(h, CMD_READ, (uint8_t)seq, LX_BIT(id) BUS_A(dst));
@@ -398,7 +396,7 @@ static inline void commit(lx_t *h, uint8_t id, const uint8_t *src)
 /* 0 = ok, else NACK reason event code */
 static int check_var(const lx_t *h, uint8_t id, uint8_t len)
 {
-    if (!is_bound(h, id)) return LX_EV_NACK_ID;
+    if (!IS_BOUND(h, id)) return LX_EV_NACK_ID;
     if (len != h->vars[id].size) return LX_EV_NACK_SIZE;
     return 0;
 }
@@ -453,7 +451,7 @@ static void on_frame(lx_t *h, const uint8_t *f, uint8_t n)
     }
 
     case CMD_READ:
-        err = !is_bound(h, id) ? LX_EV_NACK_ID
+        err = !IS_BOUND(h, id) ? LX_EV_NACK_ID
             : (plen ? LX_EV_NACK_SIZE : 0);
         if (err) {
             reply(h, CMD_NACK, seq, id, err BUS_A(src));

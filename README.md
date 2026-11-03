@@ -107,7 +107,7 @@ totalling 13 bytes in one batch are 27 + 6 = 33 bytes; a 4-byte publish is 10 by
 | Call | |
 |---|---|
 | `lx_init(h, tx, ev, ctx)` | `tx(ctx, data, len)` sends bytes; `ev(ctx, event, mask)` reports transaction results (may be NULL) |
-| `lx_bind(h, id, ptr, size)` | bind variable `id` (0..`LX_MAX_VARS`-1) to `size` bytes at `ptr` |
+| `lx_bind(h, id, ptr, size)` | bind variable `id` (0..`LX_MAX_VARS`-1) to `size` bytes at `ptr`; `LX_ERR_BUSY` while `id` is part of the transaction in flight |
 | `lx_rx(h, byte)`, `lx_rx_buf(h, data, len)` | feed received bytes |
 | `lx_poll(h)` | `LX_ISR_SAFE`: decode what `lx_rx` queued. No-op otherwise, so it is safe to always call |
 | `lx_tick(h, now_ms)` | drives timeouts and retries; call often |

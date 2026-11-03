@@ -181,6 +181,8 @@ typedef struct {
 } lx_t;
 
 void lx_init(lx_t *h, lx_tx_fn tx, lx_event_fn ev, void *ctx);
+/* Bind id (0..LX_MAX_VARS-1) to `size` bytes at `ptr`. LX_ERR_BUSY while id
+ * is part of the transaction in flight: a retransmission resends it. */
 int  lx_bind(lx_t *h, uint8_t id, void *ptr, uint8_t size);
 
 /* Concurrency. Two contexts may use a handle at the same time:

@@ -183,6 +183,9 @@ int lx_bind(lx_t *h, uint8_t id, void *ptr, uint8_t size)
 {
     if (id >= LX_MAX_VARS || !ptr || !size) return LX_ERR_ID;
     if (size > LX_MAX_PAYLOAD) return LX_ERR_SIZE;
+    /* lx_tick rebuilds a retransmission from the bindings: a larger size
+     * there would overflow tx_buf (the batch was sized at lx_write) */
+    if (lx_busy(h) && (h->p_mask & LX_BIT(id))) return LX_ERR_BUSY;
     h->vars[id].ptr = ptr;
     h->vars[id].size = size;
     h->bound |= LX_BIT(id);

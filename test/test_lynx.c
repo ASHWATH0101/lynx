@@ -299,6 +299,20 @@ int main(void) {
         CHECK(!lx_busy(&A) && ev_count == 1 && last_ev == LX_EV_DONE && a_i == 1234);
     }
 
+    puts("[22] lx_bind can't change a variable a retransmission may still send (it would overflow tx_buf)");
+    {
+        static uint8_t grow[LX_MAX_PAYLOAD];
+        setup(); lx_tick(&A, 0); a2b.drop_next = 1;             /* request lost: A will resend it */
+        CHECK(lx_bind(&A, 5, grow, LX_MAX_PAYLOAD - 8u) == LX_OK);
+        CHECK(lx_write(&A, LX_BIT(1) | LX_BIT(5)) == LX_OK); pump();   /* batch of exactly LX_MAX_PAYLOAD */
+        CHECK(lx_bind(&A, 5, grow, LX_MAX_PAYLOAD) == LX_ERR_BUSY);
+        CHECK(lx_bind(&A, 1, &a_f, 4) == LX_ERR_BUSY);
+        CHECK(lx_bind(&A, 6, grow, LX_MAX_PAYLOAD) == LX_OK);   /* not in flight */
+        lx_tick(&A, LX_TIMEOUT_MS); CHECK(A.st_retx == 1 && a2b.n <= LX_ENC_MAX);
+        pump(); CHECK(!lx_busy(&A) && ev_count == 1 && last_ev == LX_EV_NACK_ID);   /* B has no id 5 */
+        CHECK(lx_bind(&A, 5, grow, LX_MAX_PAYLOAD) == LX_OK);   /* idle again */
+    }
+
     puts("[23] a refused request doesn't use up a SEQ: a late ACK of the last write can't end the next");
     {
         uint8_t f[16]; size_t n;

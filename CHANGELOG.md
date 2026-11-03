@@ -27,6 +27,10 @@
   compile-time error like the other invalid options, and `tools/run_tests.sh` checks that every
   invalid configuration is rejected.
 
+### Changed
+- `lx_bind` returns `LX_ERR_BUSY` for an id that is part of the transaction in flight (see above),
+  also when only the pointer changes.
+
 ### Documentation
 - The concurrency contract listed `lx_bind` and `lx_set_addr` among the calls that may run while
   the RX path decodes in another context. They write the bindings and address that path reads
@@ -35,9 +39,28 @@
   critical-section hooks the event callback may run in the RX context and must not call
   app-path functions (`lx_publish` from there raced the app task on `tx_buf`).
 
-Code size (`-Os`): Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead of
-up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences). Bus and ISR-safe builds move
-the same way.
+### Tests
+- `test/fuzz_frames.c`, run by `tools/run_tests.sh` in every configuration: random frames with a
+  valid CRC (any command, SEQ, id, length, batch layout, bus addresses) mixed with random app
+  calls, rebinds and transactions chained from the callback, checking the protocol invariants
+  under ASan/UBSan. The older fuzz tests rarely get a frame past the CRC; this one finds the
+  `READ_RSP` shift bug above in under a millisecond. Also builds as a libFuzzer target.
+- New tests [22]–[24]: rebinding in flight, SEQ after refused requests, and the largest frame
+  (`LX_MAX_PAYLOAD` bytes without zeros: one full 254-byte COBS block at 250).
+- `tools/run_tests.sh` also runs the suite with `LX_MAX_VARS=8`/`LX_MAX_PAYLOAD=250` and with
+  bus + ISR-safe at 248, and checks that invalid configurations fail to compile.
+- The ThreadSanitizer stress test also runs reads, app-side publishes and `lx_take_updates`
+  against the RX thread.
+
+### Code size
+`-Os` `.text`, wire format and `sizeof(lx_t)` unchanged:
+- `p_cmd` race fix: Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead
+  of up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences).
+- Since then: Cortex-M3 +14 B, Cortex-M0+ +16 B, ESP32 +15 B, ESP32-S3 +19 B, ESP32-C3 +18 B
+  (default build; bus and ISR-safe builds +12 to +29 B). The `lx_bind` check costs 26–32 B; folding
+  the payload check into `batch_size` saves 12–14 B. Measured with the CI toolchains (Ubuntu
+  arm-none-eabi-gcc 13.2, Espressif esp-16.1.0_20260609); the tables in the README and
+  `docs/sizes.md` were made with arm-none-eabi-gcc 14.2.1 and are not regenerated here.
 
 ## 0.1.0 — 2026-11-02
 

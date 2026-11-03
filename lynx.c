@@ -120,14 +120,20 @@ static inline void enc_hdr(enc_t *e, const lx_t *h, uint8_t hdr BUS_P)
 #endif
 }
 
-/* Validate mask, return payload bytes needed (or <0 error). */
+static inline bool is_bound(const lx_t *h, uint8_t id)
+{
+    return id < LX_MAX_VARS && (h->bound & LX_BIT(id));    /* range first: no shift past 31 */
+}
+
+/* Validate mask, return payload bytes needed (or <0 error). A single
+ * variable always fits: lx_bind caps it at LX_MAX_PAYLOAD. */
 static int batch_size(const lx_t *h, uint32_t mask)
 {
     if (!mask || (mask & ~h->bound)) return LX_ERR_ID;
     if (!(mask & (mask - 1u))) return h->vars[ctz32(mask)].size;
     int n = 0;
     for (uint32_t m = mask; m; m &= m - 1u) n += 2 + h->vars[ctz32(m)].size;
-    return n;
+    return n > (int)LX_MAX_PAYLOAD ? LX_ERR_SIZE : n;
 }
 
 /* cmd is the single-var command; batch uses cmd+1. */
@@ -203,7 +209,7 @@ uint32_t lx_take_updates(lx_t *h)
 
 int lx_get(lx_t *h, uint8_t id, void *out)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_ERR_ID;
+    if (!is_bound(h, id)) return LX_ERR_ID;
     LX_ENTER_CRITICAL();
     memcpy(out, h->vars[id].ptr, h->vars[id].size);
     LX_EXIT_CRITICAL();
@@ -212,7 +218,7 @@ int lx_get(lx_t *h, uint8_t id, void *out)
 
 int lx_set(lx_t *h, uint8_t id, const void *in)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_ERR_ID;
+    if (!is_bound(h, id)) return LX_ERR_ID;
     LX_ENTER_CRITICAL();
     memcpy(h->vars[id].ptr, in, h->vars[id].size);
     LX_EXIT_CRITICAL();
@@ -223,7 +229,6 @@ static int do_publish(lx_t *h, uint32_t mask BUS_P)
 {
     int n = batch_size(h, mask);
     if (n < 0) return n;
-    if (n > (int)LX_MAX_PAYLOAD) return LX_ERR_SIZE;
     send(h, &h->st_tx, h->tx_buf, build_vars(h, h->tx_buf, CMD_PUB, 0, mask BUS_A(dst)));
     return LX_OK;
 }
@@ -266,7 +271,6 @@ static int do_write(lx_t *h, uint32_t mask BUS_P)
 {
     int n = batch_size(h, mask);
     if (n < 0) return n;
-    if (n > (int)LX_MAX_PAYLOAD) return LX_ERR_SIZE;
     int seq = start_txn(h, CMD_WRITE, mask BUS_A(dst));
     if (seq < 0) return seq;
     transmit(h, CMD_WRITE, (uint8_t)seq, mask BUS_A(dst));
@@ -275,7 +279,7 @@ static int do_write(lx_t *h, uint32_t mask BUS_P)
 
 static int do_read(lx_t *h, uint8_t id BUS_P)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_ERR_ID;
+    if (!is_bound(h, id)) return LX_ERR_ID;
     int seq = start_txn(h, CMD_READ, LX_BIT(id) BUS_A(dst));
     if (seq < 0) return seq;
     transmit(h, CMD_READ, (uint8_t)seq, LX_BIT(id) BUS_A(dst));
@@ -394,7 +398,7 @@ static inline void commit(lx_t *h, uint8_t id, const uint8_t *src)
 /* 0 = ok, else NACK reason event code */
 static int check_var(const lx_t *h, uint8_t id, uint8_t len)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_EV_NACK_ID;
+    if (!is_bound(h, id)) return LX_EV_NACK_ID;
     if (len != h->vars[id].size) return LX_EV_NACK_SIZE;
     return 0;
 }
@@ -449,7 +453,7 @@ static void on_frame(lx_t *h, const uint8_t *f, uint8_t n)
     }
 
     case CMD_READ:
-        err = (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) ? LX_EV_NACK_ID
+        err = !is_bound(h, id) ? LX_EV_NACK_ID
             : (plen ? LX_EV_NACK_SIZE : 0);
         if (err) {
             reply(h, CMD_NACK, seq, id, err BUS_A(src));

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build lynx.c warning-clean and run the host test suite under ASan+UBSan,
-# once per compile-time configuration.
+# Build lynx.c warning-clean and run the host test suite and the CRC-valid
+# frame fuzzer (test/fuzz_frames.c) under ASan+UBSan, once per compile-time
+# configuration.
 #
 #   tools/run_tests.sh            all configs
 #   CC=clang tools/run_tests.sh   another compiler
@@ -34,9 +35,10 @@ for cfg in "${CONFIGS[@]}"; do
     "$CC" $STRICT -Os $cfg -I"$ROOT" -c "$ROOT/lynx.c" -o "$OUT/strict.o"
     "$CC" $STRICT $SAN $cfg -I"$ROOT" -c "$ROOT/lynx.c" -o "$OUT/lynx.o"
     "$CC" -std=c99 -Wall -Wextra -Werror $SAN $cfg -I"$ROOT" "$OUT/lynx.o" "$ROOT/test/test_lynx.c" -o "$OUT/t"
+    "$CC" -std=c99 -Wall -Wextra -Werror $SAN $cfg -I"$ROOT" "$OUT/lynx.o" "$ROOT/test/fuzz_frames.c" -o "$OUT/fz"
   }
-  if "$OUT/t" > "$OUT/log" 2>&1; then
-    grep -E "delivered|critical sections|PASSED" "$OUT/log"
+  if "$OUT/t" > "$OUT/log" 2>&1 && "$OUT/fz" >> "$OUT/log" 2>&1; then
+    grep -E "delivered|critical sections|CRC-valid|PASSED" "$OUT/log"
   else
     cat "$OUT/log"; echo "FAILED: ${cfg:-default}"; exit 1
   fi

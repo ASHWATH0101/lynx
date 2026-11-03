@@ -259,12 +259,17 @@ tools/size_report.sh [-DLX_BUS=1]   # cross-compile sizes for the toolchains on 
 ```
 
 `run_tests.sh` builds `lynx.c` with `-Wall -Wextra -Werror -Wconversion -Wshadow -pedantic` and
-runs [`test/test_lynx.c`](test/test_lynx.c) under ASan + UBSan in 11 configurations (default,
-lead delimiter, CTZ fallback, bus mode, ISR-safe with 16/128/256-byte queues, and with a test port
-that checks the critical-section contract and fires simulated interrupts at the worst moments).
+runs [`test/test_lynx.c`](test/test_lynx.c) under ASan + UBSan in 13 configurations (default,
+lead delimiter, CTZ fallback, bus mode, ISR-safe with 16/128/256-byte queues, 8 variables with
+250-byte frames, and with a test port that checks the critical-section contract and fires
+simulated interrupts at the worst moments).
 Highlights: 200 000 frames through random bit flips with zero corrupted commits, 2 000 000 bytes
 of noise into the parser, a three-node bus fuzz with zero misrouted commits, ACK / timeout /
-read-response races, queue overflow.
+read-response races, queue overflow, the largest possible frame. In each configuration
+[`test/fuzz_frames.c`](test/fuzz_frames.c) then sends 300 000 random steps of frames that pass the
+CRC (any command, id, length, batch layout, address) and random API calls, checking the protocol
+invariants (`clang -DLIBFUZZER -fsanitize=fuzzer,...` turns it into a libFuzzer target), and
+invalid configurations must fail to compile.
 [`test/test_threads.c`](test/test_threads.c) then runs both nodes in real threads under
 ThreadSanitizer with a lossy link and 2 ms timeouts, and
 [`extras/bench/host/sim.c`](extras/bench/host/sim.c) checks the benchmark harness against wire

@@ -161,7 +161,10 @@ A handle has two sides: the **RX path** (`lx_rx`, or `lx_poll` with `LX_ISR_SAFE
    (the ESP-IDF and Zephyr ports do). They guard the transaction state, the update flags and the
    bound variables; use `lx_get`/`lx_set` for variables the other side writes or sends. `tx()` is
    then called from both sides and must keep each call's bytes together; from an ISR, `tx()` and
-   `ev()` must be ISR-safe. Example: [`extras/esp-idf/uart_sync`](extras/esp-idf/uart_sync).
+   `ev()` must be ISR-safe. The hooks don't guard the setup: call `lx_init`, `lx_bind` and
+   `lx_set_addr` before the RX side starts. Answers fire the event callback in the RX context, so
+   it must not call app-side functions (`lx_write`, `lx_publish`, ...): signal the app task
+   instead. Example: [`extras/esp-idf/uart_sync`](extras/esp-idf/uart_sync).
 3. **`LX_ISR_SAFE`**: the ISR calls `lx_rx`, which only appends to a lock-free single-producer
    queue (no callbacks, no locks, safe on another core). The app task calls `lx_poll`, so all
    decoding, replies and events happen in that one task and no hooks are needed. If the queue

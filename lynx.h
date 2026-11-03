@@ -193,12 +193,15 @@ int  lx_bind(lx_t *h, uint8_t id, void *ptr, uint8_t size);
  *  - the app path: every other lx_* call, all from ONE task.
  * LX_ENTER/EXIT_CRITICAL guard what they share: the transaction in flight,
  * the update flags and the bound variables (use lx_get / lx_set for a
- * variable the other context writes or sends). Each transaction ends with
- * exactly one event: DONE or NACK from the RX path, TIMEOUT from lx_tick,
- * and lx_busy() stays true until that callback has returned.
+ * variable the other context writes or sends). They don't guard the setup:
+ * call lx_init, lx_bind and lx_set_addr before an RX path in another context
+ * starts decoding. Each transaction ends with exactly one event: DONE or
+ * NACK from the RX path, TIMEOUT from lx_tick, and lx_busy() stays true
+ * until that callback has returned.
  * tx() is called from both paths and must keep each call's bytes together on
  * the wire. Without critical-section hooks (one context) the callback may
- * start the next transaction; with hooks, start it after the callback.
+ * start the next transaction. With hooks it may run in the RX context, so it
+ * must not call app-path functions: start the next transaction after it.
  * With LX_ISR_SAFE and lx_poll() called from the app task, everything but
  * the byte queue runs in that task: no hooks needed. */
 

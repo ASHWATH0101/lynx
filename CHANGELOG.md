@@ -27,6 +27,14 @@
   compile-time error like the other invalid options, and `tools/run_tests.sh` checks that every
   invalid configuration is rejected.
 
+### Documentation
+- The concurrency contract listed `lx_bind` and `lx_set_addr` among the calls that may run while
+  the RX path decodes in another context. They write the bindings and address that path reads
+  without the lock (a rebind could pair a new pointer with an old size), so `lynx.h` and the
+  README now say to make the setup calls before the RX side starts. Also spelled out: with
+  critical-section hooks the event callback may run in the RX context and must not call
+  app-path functions (`lx_publish` from there raced the app task on `tx_buf`).
+
 Code size (`-Os`): Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead of
 up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences). Bus and ISR-safe builds move
 the same way.

@@ -161,7 +161,7 @@ int main(void) {
     CHECK(A.st_tx == 1); pump();
     CHECK(b_u8 == 7 && b_f == -1.5f && b_i == 99); CHECK(last_ev == LX_EV_DONE);
     CHECK(lx_take_updates(&B) == (LX_BIT(0) | LX_BIT(1) | LX_BIT(2)));
-    CHECK(lx_write(&A, LX_BIT(0) | LX_BIT(3)) == LX_ERR_SIZE); /* 1+2+60+2 > 64 */
+    CHECK(lx_write(&A, LX_BIT(0) | LX_BIT(3)) == (2 + 1 + 2 + 60 > LX_MAX_PAYLOAD ? LX_ERR_SIZE : LX_OK));
 
     puts("[4] read remote value");
     setup(); b_i = 424242; a_i = 0; CHECK(lx_read(&A, 2) == LX_OK); pump();
@@ -227,7 +227,7 @@ int main(void) {
     puts("[13] fuzz: pure random noise into parser (crash/overflow check)");
     setup(); for (long k = 0; k < 2000000; k++) { uint8_t x = (uint8_t)rand(); feed(&B, &x, 1); } CHECK(1);
 
-    puts("[14] every id 0..31: single publish, reliable write, scattered batch");
+    puts("[14] every id 0..LX_MAX_VARS-1: single publish, reliable write, scattered batch");
     {
         static uint8_t av[LX_MAX_VARS], bv[LX_MAX_VARS];
         setup();
@@ -241,7 +241,7 @@ int main(void) {
             CHECK(!lx_busy(&A) && last_ev == LX_EV_DONE && last_mask == LX_BIT(id) && bv[id] == id + 101);
             CHECK(lx_take_updates(&B) == LX_BIT(id));
         }
-        uint32_t m = LX_BIT(1) | LX_BIT(7) | LX_BIT(8) | LX_BIT(15) | LX_BIT(16) | LX_BIT(23) | LX_BIT(30) | LX_BIT(31);
+        uint32_t m = (LX_BIT(1) | LX_BIT(7) | LX_BIT(8) | LX_BIT(15) | LX_BIT(16) | LX_BIT(23) | LX_BIT(30) | LX_BIT(31)) & A.bound;
         for (uint8_t id = 0; id < LX_MAX_VARS; id++) { av[id] = (uint8_t)(200 + id); bv[id] = 0; }
         lx_take_updates(&B);
         CHECK(lx_write(&A, m) == LX_OK); pump(); CHECK(last_ev == LX_EV_DONE && last_mask == m);
@@ -304,6 +304,7 @@ int main(void) {
         static uint8_t grow[LX_MAX_PAYLOAD];
         setup(); lx_tick(&A, 0); a2b.drop_next = 1;             /* request lost: A will resend it */
         CHECK(lx_bind(&A, 5, grow, LX_MAX_PAYLOAD - 8u) == LX_OK);
+        CHECK(lx_write(&A, LX_BIT(0) | LX_BIT(1) | LX_BIT(5)) == LX_ERR_SIZE);   /* 3 bytes over */
         CHECK(lx_write(&A, LX_BIT(1) | LX_BIT(5)) == LX_OK); pump();   /* batch of exactly LX_MAX_PAYLOAD */
         CHECK(lx_bind(&A, 5, grow, LX_MAX_PAYLOAD) == LX_ERR_BUSY);
         CHECK(lx_bind(&A, 1, &a_f, 4) == LX_ERR_BUSY);
@@ -327,6 +328,28 @@ int main(void) {
         CHECK(A.p_seq == ((s1 + 1u) & 0x0Fu));
         n = head_b2a(f, 7, s1, 0); inject(&b2a, f, n); pump();  /* duplicate ACK of the first write */
         CHECK(lx_busy(&A) && ev_count == 1);
+    }
+
+    puts("[24] largest frame: LX_MAX_PAYLOAD bytes without zeros (one full 254-byte COBS block at 250)");
+    {
+        static uint8_t af[LX_MAX_PAYLOAD], bf[LX_MAX_PAYLOAD];
+        size_t longest = 0;
+        for (uint8_t fill = 1; fill <= 8; fill++) {             /* some fill leaves no zero in the CRC either */
+            setup(); lx_tick(&A, 0);
+            CHECK(lx_bind(&A, 6, af, LX_MAX_PAYLOAD) == LX_OK && lx_bind(&B, 6, bf, LX_MAX_PAYLOAD) == LX_OK);
+            memset(af, fill, sizeof af); af[0] = (uint8_t)(0x80u | fill); memset(bf, 0, sizeof bf);
+            CHECK(lx_publish(&A, LX_BIT(6)) == LX_OK);
+            CHECK(a2b.n <= LX_ENC_MAX); if (a2b.n > longest) longest = a2b.n;
+            pump(); CHECK(memcmp(af, bf, sizeof af) == 0 && lx_take_updates(&B) == LX_BIT(6));
+            memset(af, (uint8_t)(fill + 8u), sizeof af);
+            CHECK(lx_write(&A, LX_BIT(6)) == LX_OK); pump();
+            CHECK(!lx_busy(&A) && last_ev == LX_EV_DONE && memcmp(af, bf, sizeof af) == 0);
+            memset(bf, (uint8_t)(fill + 16u), sizeof bf);
+            CHECK(lx_read(&A, 6) == LX_OK); pump();
+            CHECK(!lx_busy(&A) && last_ev == LX_EV_DONE && memcmp(af, bf, sizeof af) == 0);
+            CHECK(A.st_rx_bad == 0 && B.st_rx_bad == 0);
+        }
+        CHECK(longest == (LX_RAW_MAX == 254u ? LX_ENC_MAX : LX_ENC_MAX - 1u));   /* the worst case was reached */
     }
 
 #if defined(LX_PORT) && !LX_ISR_SAFE

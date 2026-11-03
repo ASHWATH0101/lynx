@@ -23,6 +23,8 @@ CONFIGS=(
   "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=16"
   "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=256 -DLX_BUS=1"
   "-DLX_PORT -I$ROOT/test/port -DLX_ISR_SAFE=1"
+  "-DLX_MAX_VARS=8u -DLX_MAX_PAYLOAD=250u"    # non-default limits; largest frame = one full COBS block
+  "-DLX_BUS=1 -DLX_MAX_PAYLOAD=248u -DLX_ISR_SAFE=1"
 )
 
 for cfg in "${CONFIGS[@]}"; do

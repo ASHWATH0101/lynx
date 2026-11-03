@@ -12,7 +12,7 @@ BLE, Wi-Fi). Bind variables to ids on both ends; LYNX keeps them in sync.
 - **Multi-drop bus** mode with node addresses and broadcast (`LX_BUS`)
 - **ISR-safe receive** mode: the UART ISR only queues bytes (`LX_ISR_SAFE`)
 - COBS framing + CRC-16 computed in one streaming pass; **O(1) work per received byte**
-- C99, no heap, no dependencies beyond `<string.h>`; ~2.1 KB of code on a Cortex-M3
+- C99, no heap, no dependencies beyond `<string.h>`; ~2 KB of code on a Cortex-M3
 - MIT licensed. Ready-made packaging for ESP-IDF, Arduino and Zephyr.
 
 ```c
@@ -57,7 +57,7 @@ void loop(void)
 
 - [Frame format](#frame-format) · [API](#api) · [Configuration](#configuration) ·
   [Concurrency and ISRs](#concurrency-and-isrs) · [Platforms](#platforms) ·
-  [Benchmarks](#benchmarks) · [Tests](#tests) · [License](#license)
+  [Source code](#source-code) · [Benchmarks](#benchmarks) · [Tests](#tests) · [License](#license)
 
 ## Frame format
 
@@ -195,8 +195,9 @@ Built in CI for Uno, Mega and ESP32.
 `ZEPHYR_EXTRA_MODULES` and set `CONFIG_LYNX=y`. Its port uses a `k_spinlock`. Sample using
 `CONFIG_LYNX_ISR_SAFE`: [`extras/zephyr/uart_sync`](extras/zephyr/uart_sync).
 
-**Anything else** — compile `lynx.c` with your project (or `add_subdirectory` this repository
-in CMake, target `lynx::lynx`). On a Cortex-M with an RX interrupt, either use `LX_ISR_SAFE` or:
+**Anything else** — compile the `.c` files in `src/` with your project and add `src/` to the
+include path (or `add_subdirectory` this repository in CMake, target `lynx::lynx`). On a
+Cortex-M with an RX interrupt, either use `LX_ISR_SAFE` or:
 
 ```c
 #define LX_ENTER_CRITICAL() uint32_t lx_pm = __get_PRIMASK(); __disable_irq()
@@ -205,6 +206,23 @@ in CMake, target `lynx::lynx`). On a Cortex-M with an RX interrupt, either use `
 
 (`LX_ENTER_CRITICAL` may declare a local; LYNX never nests critical sections.)
 
+## Source code
+
+The library is the [`src/`](src) directory. [`lynx.h`](src/lynx.h) is the whole API and
+[`lynx_config.h`](src/lynx_config.h) the compile-time options. Each `.c` file does one job:
+
+| File | Job |
+|---|---|
+| [`lynx.c`](src/lynx.c) | API entry points: init, bind, publish / write / read, get / set |
+| [`lynx_encode.c`](src/lynx_encode.c) | variables → frame: CRC and COBS in a single pass |
+| [`lynx_decode.c`](src/lynx_decode.c) | received bytes → checked frame, in O(1) per byte; the `LX_ISR_SAFE` queue |
+| [`lynx_dispatch.c`](src/lynx_dispatch.c) | received frame → commit, ACK / NACK, read response |
+| [`lynx_txn.c`](src/lynx_txn.c) | the reliable write or read in flight: SEQ, retries, timeout, its one event |
+
+[docs/architecture.md](docs/architecture.md) walks through them by following one reliable write,
+byte by byte, from `lx_write` to the ACK, and explains the transaction states and the
+concurrency rules.
+
 ## Benchmarks
 
 Comparisons are against [BAVA](https://github.com/NishanthRaj707/bavaprotocol) v2, built from
@@ -212,21 +230,21 @@ source as a black box through its public API (`tools/size_report.sh`, `test/benc
 `extras/bench`). BAVA has no batching and no un-acknowledged mode, so its "4 variables" figures
 are four writes in a row, each waiting for its ACK.
 
-**Code size** (`.text` of the object file, `-Os`, see [docs/sizes.md](docs/sizes.md) for all
+**Code size** (`.text` of the object files, `-Os`, see [docs/sizes.md](docs/sizes.md) for all
 targets, RAM and caveats):
 
 | | Cortex-M3 | ESP32 | ESP32-C3 |
 |---|---:|---:|---:|
-| LYNX | 2056 | 2633 | 2858 |
-| LYNX `LX_BUS=1` | 2430 | 3016 | 3238 |
-| LYNX `LX_ISR_SAFE=1` | 2244 | 2846 | 3098 |
-| BAVA (always includes bus mode) | 2086 | 2730 | 2588 |
+| LYNX | 1954 | 2678 | 2948 |
+| LYNX `LX_BUS=1` | 2280 | 3068 | 3246 |
+| LYNX `LX_ISR_SAFE=1` | 2138 | 2883 | 3188 |
+| BAVA (always includes bus mode) | 2074 | 2730 | 2588 |
 | RAM: `sizeof(lx_t)` / `sizeof(bava_handle_t)` | 528 / 556 | 528 / 560 | 528 / 560 |
 
-LYNX's default build is level with BAVA on Cortex-M, smaller on Xtensa and larger on RISC-V,
-while also carrying publish, batch writes, reads, NACK reasons, retries and `lx_get`/`lx_set`
-(unused functions drop out at link time with `--gc-sections`). The concurrency hardening in 0.1.0
-cost about 200 bytes; the payload buffer size does not affect code size.
+LYNX's default build is smaller than BAVA on Cortex-M and Xtensa and larger on RISC-V, while
+also carrying publish, batch writes, reads, NACK reasons, retries and `lx_get`/`lx_set` (unused
+functions drop out at link time with `--gc-sections`). The concurrency hardening in 0.1.0 cost
+about 200 bytes; the payload buffer size does not affect code size.
 
 **Host benchmark** (`test/bench_vs_bava.c`: two nodes in one process, the link is a memory copy,
 `gcc -O2`, Intel Core Ultra 5 125H under WSL; median of 5 runs, range in brackets):
@@ -255,7 +273,7 @@ BAVA_DIR=/path/to/bavaprotocol tools/run_tests.sh   # also runs the BAVA benchma
 tools/size_report.sh [-DLX_BUS=1]   # cross-compile sizes for the toolchains on PATH
 ```
 
-`run_tests.sh` builds `lynx.c` with `-Wall -Wextra -Werror -Wconversion -Wshadow -pedantic` and
+`run_tests.sh` builds `src/*.c` with `-Wall -Wextra -Werror -Wconversion -Wshadow -pedantic` and
 runs [`test/test_lynx.c`](test/test_lynx.c) under ASan + UBSan in 11 configurations (default,
 lead delimiter, CTZ fallback, bus mode, ISR-safe with 16/128/256-byte queues, and with a test port
 that checks the critical-section contract and fires simulated interrupts at the worst moments).

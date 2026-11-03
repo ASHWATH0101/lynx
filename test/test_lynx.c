@@ -1,5 +1,5 @@
 /* Host test suite: two nodes over an in-memory lossy link. */
-#include "../lynx.h"
+#include "lynx.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

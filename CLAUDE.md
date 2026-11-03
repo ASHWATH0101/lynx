@@ -10,7 +10,9 @@ so it can be MIT-licensed. BAVA may only be used as a black box through its publ
 for benchmarking (test/bench_vs_bava.c).
 
 ## Current state (all passing)
-- lynx.h / lynx.c: C99, -Wall -Wextra -Werror -Wconversion clean, ~3.4 KB at -Os (x86).
+- src/: lynx.h (API), lynx_config.h (options), lynx.c (entry points), lynx_encode.c, lynx_decode.c,
+  lynx_dispatch.c, lynx_txn.c, lynx_internal.h. C99, -Wall -Wextra -Werror -Wconversion clean.
+  docs/architecture.md explains the layout. (Was a single lynx.c until 2026-11-03.)
 - Frame: COBS([HDR=(CMD<<4)|SEQ][ID][PAYLOAD][CRC16 BE]) + 0x00. CRC-16/CCITT-FALSE, table-free.
 - CRC + COBS done in ONE streaming pass on TX; on RX, COBS decode + CRC run per byte,
   valid iff CRC residue == 0 (no second pass).
@@ -18,7 +20,7 @@ for benchmarking (test/bench_vs_bava.c).
   read, ACK/NACK with reasons, 4-bit SEQ matching, auto-retry + timeout, wraparound-safe clock,
   bitmask update flags (lx_take_updates), separate RX reply buffer, link stats.
 - test/test_lynx.c: 13 tests incl. 200k-frame bit-flip fuzz (0 bad commits) and 2M-byte noise
-  fuzz, under ASan+UBSan. Run: `gcc -std=c99 -O2 -fsanitize=address,undefined -I. lynx.c test/test_lynx.c && ./a.out`
+  fuzz, under ASan+UBSan. Run: `gcc -std=c99 -O2 -fsanitize=address,undefined -Isrc src/*.c test/test_lynx.c && ./a.out`
 
 ## Host benchmark vs BAVA v2 (x86, same compiler, public APIs only)
 | Case | BAVA | LYNX |
@@ -60,3 +62,10 @@ Do not weaken any existing test. Keep zero heap, O(1) per byte, C99.
 - Published at https://github.com/ASHWATH0101/lynx (public). Commits use the GitHub noreply
   address (repo-local git config), never the personal email.
 - Bus mode costs nothing when off: verified byte-identical disassembly when it was added.
+
+## Status after the 2026-11-03 session
+- Review feedback ("not understandable, everything in a single file") addressed: lynx.c split into
+  src/ by job, see CHANGELOG. Behaviour verified identical with a differential trace (old vs new
+  sources, 11 configs); sizes re-measured for LYNX and BAVA with arm-none-eabi-gcc 13.2.1 (what CI
+  installs), ESP 16.1.0 and host gcc 13.3.
+- Arduino build of the new src/ layout not verified locally (arduino downloads blocked); CI covers it.

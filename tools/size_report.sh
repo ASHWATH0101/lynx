@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Cross-compile size report: .text/.data/.bss of lynx.o and sizeof(lx_t) per target.
+# Cross-compile size report: .text/.data/.bss of the LYNX objects (src/*.c, summed)
+# and sizeof(lx_t) per target.
 #
 #   tools/size_report.sh [extra cflags...]        e.g. tools/size_report.sh -DLX_BUS=1
 #
@@ -47,13 +48,17 @@ for t in "${TARGETS[@]}"; do
     echo "$row"; continue
   fi
   pre=${cc%gcc}; d="$OUT/$pre${label//[^A-Za-z0-9]/_}"; mkdir -p "$d"
-  # shellcheck disable=SC2086
-  "$cc" -std=c99 -Wall -Wextra -Werror -Wconversion $COMMON $tflags "${EXTRA[@]}" \
-        -I"$ROOT" -c "$ROOT/lynx.c" -o "$d/lynx.o"
+  lx_objs=()
+  for s in "$ROOT"/src/*.c; do
+    o="$d/lynx_$(basename "$s" .c).o"
+    # shellcheck disable=SC2086
+    "$cc" -std=c99 -Wall -Wextra -Werror -Wconversion $COMMON $tflags "${EXTRA[@]}" \
+          -I"$ROOT/src" -c "$s" -o "$o"; lx_objs+=("$o")
+  done
   printf '#include "lynx.h"\nlx_t lx_probe;\n' > "$d/p.c"
   # shellcheck disable=SC2086
-  "$cc" -std=c99 -fno-common $COMMON $tflags "${EXTRA[@]}" -I"$ROOT" -c "$d/p.c" -o "$d/p.o"
-  read -r tx da bs <<<"$(sum_size "${pre}size" "$d/lynx.o")"
+  "$cc" -std=c99 -fno-common $COMMON $tflags "${EXTRA[@]}" -I"$ROOT/src" -c "$d/p.c" -o "$d/p.o"
+  read -r tx da bs <<<"$(sum_size "${pre}size" "${lx_objs[@]}")"
   row="| $label | $tx | $da | $bs | $(sizeof_sym "${pre}nm" "$d/p.o" lx_probe) |"
 
   if [ "$label" = "Cortex-M3" ] && [ -n "${LX_BUDGET_CM3:-}" ] && [ "$tx" -gt "$LX_BUDGET_CM3" ]; then

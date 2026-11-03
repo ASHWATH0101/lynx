@@ -14,7 +14,7 @@
  * landed on B, values read with lx_get are never torn, no TSan reports.
  * MIT License (c) 2026 Ashwath */
 #define _POSIX_C_SOURCE 200809L
-#include "../lynx.h"
+#include "lynx.h"
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>

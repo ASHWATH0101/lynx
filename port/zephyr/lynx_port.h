@@ -1,4 +1,4 @@
-/* LYNX port: Zephyr. Included by lynx.h when the module sets -DLX_PORT.
+/* LYNX port: Zephyr. Included by lynx_config.h when the module sets -DLX_PORT.
  * MIT License (c) 2026 Ashwath */
 #ifndef LYNX_PORT_H
 #define LYNX_PORT_H

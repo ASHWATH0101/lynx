@@ -1,6 +1,6 @@
 /* Test port (tools/run_tests.sh builds with -DLX_PORT -Itest/port).
- * Enforces the critical-section contract documented in lynx.h:
- *  - LX_ENTER_CRITICAL() declares a local, like real ports may, so lynx.c
+ * Enforces the critical-section contract documented in lynx_config.h:
+ *  - LX_ENTER_CRITICAL() declares a local, like real ports may, so the build
  *    fails to compile if a section is opened where that is illegal;
  *  - sections never nest and every path leaves them balanced
  *    (test_lynx.c checks lx_cs_depth == 0 and lx_cs_max == 1);

@@ -2,27 +2,29 @@
 
 Regenerate with `BAVA_DIR=/path/to/bavaprotocol tools/size_report.sh [-DLX_...]`.
 BAVA is built as a black box (`src/*.c` + `include/`, bare-metal path, `-std=gnu11 -w`);
-LYNX is built `-std=c99 -Wall -Wextra -Werror -Wconversion`. Both at
-`-Os -ffunction-sections -fdata-sections`. `.text` includes `.rodata`; neither library has
-static RAM, all state lives in the handle.
+LYNX is built `-std=c99 -Wall -Wextra -Werror -Wconversion`, one object per file in `src/`,
+sizes summed. Both at `-Os -ffunction-sections -fdata-sections`. `.text` includes `.rodata`;
+neither library has static RAM, all state lives in the handle.
 
-Toolchains: arm-none-eabi-gcc 14.2.1, xtensa/riscv32-esp-elf-gcc 16.1.0 (esp-16.1.0_20260609),
-host gcc 15.2. BAVA at commit `b13ba07` (2026-11-01). Measured 2026-11-02 on LYNX 0.1.0; LYNX
-columns re-measured 2026-11-03 after the `p_cmd` race fix (see CHANGELOG).
+Toolchains: arm-none-eabi-gcc 13.2.1 (the Ubuntu 24.04 package CI uses), xtensa/riscv32-esp-elf-gcc
+16.1.0 (esp-16.1.0_20260609), host gcc 13.3. BAVA at commit `b13ba07` (2026-11-01). Both
+libraries measured 2026-11-03, after LYNX's sources were split into `src/` (see CHANGELOG).
+Earlier editions of this page used arm-none-eabi-gcc 14.2.1 and host gcc 15.2, which give
+different absolute numbers for both libraries.
 
 ## Default build (LYNX `LX_MAX_PAYLOAD=64`, BAVA `BAVA_MAX_PAYLOAD=32`)
 
 | Target | LYNX .text | sizeof(lx_t) | BAVA .text | sizeof(bava_handle_t) |
 |---|---:|---:|---:|---:|
-| x86-64 host | 3861 | 800 | 4283 | 968 |
-| Cortex-M3 | 2056 | 528 | 2086 | 556 |
-| Cortex-M0+ | 2246 | 528 | 2296 | 556 |
-| ESP32 (Xtensa LX6) | 2633 | 528 | 2730 | 560 |
-| ESP32-S3 (Xtensa LX7) | 2637 | 528 | 2722 | 560 |
-| ESP32-C3 (RV32IMC) | 2858 | 528 | 2588 | 560 |
+| x86-64 host | 3839 | 800 | 3781 | 968 |
+| Cortex-M3 | 1954 | 528 | 2074 | 556 |
+| Cortex-M0+ | 2092 | 528 | 2272 | 556 |
+| ESP32 (Xtensa LX6) | 2678 | 528 | 2730 | 560 |
+| ESP32-S3 (Xtensa LX7) | 2686 | 528 | 2722 | 560 |
+| ESP32-C3 (RV32IMC) | 2948 | 528 | 2588 | 560 |
 
-At equal payload (`-DLX_MAX_PAYLOAD=32u`) LYNX code is the same and `sizeof(lx_t)` drops to
-**432 B** on 32-bit MCUs (704 B on x86-64), against 556–560 B for BAVA.
+At equal payload (`-DLX_MAX_PAYLOAD=32u`) LYNX code is within 10 bytes of this and
+`sizeof(lx_t)` drops to **432 B** on 32-bit MCUs (704 B on x86-64), against 556–560 B for BAVA.
 
 ## Bus mode (`-DLX_BUS=1`) and ISR-safe receive (`-DLX_ISR_SAFE=1`)
 
@@ -30,12 +32,12 @@ BAVA always includes its bus mode, so the bus row is the like-for-like compariso
 
 | Target | LYNX bus | sizeof | LYNX ISR-safe | sizeof | BAVA |
 |---|---:|---:|---:|---:|---:|
-| x86-64 host | 4484 | 808 | 4088 | 952 | 4283 |
-| Cortex-M3 | 2430 | 540 | 2244 | 680 | 2086 |
-| Cortex-M0+ | 2648 | 540 | 2474 | 680 | 2296 |
-| ESP32 (Xtensa LX6) | 3016 | 540 | 2846 | 680 | 2730 |
-| ESP32-S3 (Xtensa LX7) | 3020 | 540 | 2850 | 680 | 2722 |
-| ESP32-C3 (RV32IMC) | 3238 | 540 | 3098 | 680 | 2588 |
+| x86-64 host | 4415 | 808 | 4103 | 952 | 3781 |
+| Cortex-M3 | 2280 | 540 | 2138 | 680 | 2074 |
+| Cortex-M0+ | 2472 | 540 | 2322 | 680 | 2272 |
+| ESP32 (Xtensa LX6) | 3068 | 540 | 2883 | 680 | 2730 |
+| ESP32-S3 (Xtensa LX7) | 3076 | 540 | 2891 | 680 | 2722 |
+| ESP32-C3 (RV32IMC) | 3246 | 540 | 3188 | 680 | 2588 |
 
 The ISR-safe handle includes the 128-byte receive queue and its 16-byte gap bitmap.
 
@@ -48,6 +50,8 @@ The ISR-safe handle includes the 128-byte receive queue and its 16-byte gap bitm
 | `lx_get` / `lx_set` (dropped by `--gc-sections` when unused) | 1898 |
 | Concurrency hardening | 2100 |
 | `p_cmd` race fix (one atomic load per check instead of up to three volatile loads) | 2056 |
+| *Same sources with arm-none-eabi-gcc 13.2.1 (all rows below)* | *2058* |
+| Sources split into `src/`, one object per file (see below) | 1954 |
 
 Hardening (+202 B on M3): ~100 B in the RX decoder (answers are matched and the transaction
 closed under the lock, event delivered before the handle goes idle, NACK reasons validated),
@@ -57,7 +61,28 @@ changes elsewhere.
 
 `LX_BUS=0` costs nothing: when bus mode was added, `lynx.o` built with `-DLX_BUS=0` was
 byte-for-byte identical to the sources without it on all six targets. All bus code sits inside
-`#if LX_BUS` or the `BUS_P`/`BUS_A()` parameter macros, which expand to nothing.
+`#if LX_BUS` or the `BUS_ADDR_PARAM()`/`BUS_ADDR_ARG()` parameter macros, which expand to nothing.
+
+## Effect of splitting the sources
+
+0.1.0 was a single `lynx.c`; the sources are now one file per job (see
+[architecture.md](architecture.md)). Behaviour is unchanged (a differential trace of 300 000
+random API calls, link errors and noise gives identical output in 11 build configurations), but
+the compiler now optimises each file on its own and makes different inlining choices. Default
+build, same toolchains:
+
+| Target | single `lynx.c` | `src/*.c` | |
+|---|---:|---:|---:|
+| x86-64 host | 3825 | 3839 | +14 |
+| Cortex-M3 | 2058 | 1954 | −104 |
+| Cortex-M0+ | 2230 | 2092 | −138 |
+| ESP32 (Xtensa LX6) | 2633 | 2678 | +45 |
+| ESP32-S3 (Xtensa LX7) | 2637 | 2686 | +49 |
+| ESP32-C3 (RV32IMC) | 2858 | 2948 | +90 |
+
+Bus and ISR-safe builds move the same way (Cortex-M3 −146 / −104 B, ESP32-C3 +8 / +90 B). On
+ESP32-C3 most of the growth is the encoder: its `enc_var`/`enc_end` helpers are now inlined into
+both frame builders instead of being called. Host benchmark speed is unchanged.
 
 ## What the object sizes don't show
 
@@ -72,7 +97,7 @@ External symbols each object pulls in at link time:
 
 The handed-over LYNX used `__builtin_ctz` everywhere. On cores without a CLZ/CTZ instruction
 (Cortex-M0+, RV32IMC) that is a call to libgcc's `__ctzsi2`, which on RISC-V also drags in the
-256 B `__clz_tab`: **314 B of hidden flash on ESP32-C3**, 64 B on M0+. `lynx.c` now uses the
+256 B `__clz_tab`: **314 B of hidden flash on ESP32-C3**, 64 B on M0+. `lynx_encode.c` uses the
 builtin only where it is a native instruction (x86, AArch64, ARMv7-M+, Xtensa with NSA, RISC-V
 Zbb) and a 5-step binary search elsewhere (`LX_CTZ_BUILTIN` overrides). Net linked effect:
 ESP32-C3 −258 B, Cortex-M0+ −10 B, others unchanged.

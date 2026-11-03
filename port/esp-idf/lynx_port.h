@@ -1,4 +1,4 @@
-/* LYNX port: ESP-IDF. Included by lynx.h when the component sets -DLX_PORT.
+/* LYNX port: ESP-IDF. Included by lynx_config.h when the component sets -DLX_PORT.
  * MIT License (c) 2026 Ashwath */
 #ifndef LYNX_PORT_H
 #define LYNX_PORT_H

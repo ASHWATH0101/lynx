@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Changed
+- **Sources split by job** into `src/`, after review feedback that a single file was hard to
+  follow. `lynx.h` now holds only the API; the compile-time options moved to `lynx_config.h`.
+  The implementation is `lynx.c` (API entry points), `lynx_encode.c` (frames out),
+  `lynx_decode.c` (bytes in, ISR-safe queue), `lynx_dispatch.c` (acting on received frames) and
+  `lynx_txn.c` (the reliable write/read: retries, timeout, event), with `lynx_internal.h`
+  shared between them. Long functions were broken up (one handler per received command) and
+  every file starts with a description of its job. New
+  [docs/architecture.md](docs/architecture.md) walks through the code following one write.
+- No change to behaviour, the wire format, the API or `sizeof(lx_t)`. A differential trace (300 000
+  random API calls over a lossy link with line noise, every byte sent, event, return code and
+  critical section hashed) gives identical results for the old and new sources in 11 build
+  configurations, and the test suite's deterministic output is unchanged.
+- **Build integration**: the include path is now `src/`. The ESP-IDF component, Zephyr module,
+  CMake target and Arduino library (now in the 1.5 `src/` layout) are updated; other builds
+  must compile `src/*.c` and add `-Isrc`.
+- Code size (`-Os`, sum of the objects): Cortex-M3 −104 B, Cortex-M0+ −138 B, ESP32 +45 B,
+  ESP32-S3 +49 B, ESP32-C3 +90 B in the default build (details in `docs/sizes.md`). CI size budgets
+  lowered to stay ~5% above the new Cortex-M3 sizes.
+
 ### Fixed
 - **Data race on `p_cmd`**: `finish()` clears it with an atomic store outside the lock, but
   `lx_tick`, `start_txn` and the answer matcher read it with plain loads under the lock.

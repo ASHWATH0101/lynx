@@ -53,18 +53,18 @@ jobs:
         # shell: bash adds -o pipefail, so a failed check isn't hidden by `| tee`
         shell: bash
         run: |
-          # budgets: ~5% above the current size of each build
+          # budgets: ~5% above the current size of each build (arm-none-eabi-gcc 13.2)
           check() {
             local budget=$1; shift
             echo; echo "### ${*:-default} (Cortex-M3 budget $budget B)"
             LX_BUDGET_CM3=$budget tools/size_report.sh "$@"
           }
           {
-            echo '## lynx.o sizes'
+            echo '## LYNX object sizes (src/*.c)'
             fail=0
-            check 2200 || fail=1
-            check 2550 -DLX_BUS=1 || fail=1
-            check 2400 -DLX_ISR_SAFE=1 || fail=1
+            check 2050 || fail=1
+            check 2400 -DLX_BUS=1 || fail=1
+            check 2250 -DLX_ISR_SAFE=1 || fail=1
             exit $fail      # report every build first, then fail
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -159,7 +159,7 @@ jobs:
           {
             echo '## LYNX vs BAVA (object sizes)'; tools/size_report.sh
             echo; echo '## Host benchmark'; echo '```'
-            gcc -std=c99 -O2 -I. -I"$BAVA_DIR/include" lynx.c "$BAVA_DIR"/src/*.c test/bench_vs_bava.c -o bench
+            gcc -std=c99 -O2 -Isrc -I"$BAVA_DIR/include" src/*.c "$BAVA_DIR"/src/*.c test/bench_vs_bava.c -o bench
             ./bench
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"

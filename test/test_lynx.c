@@ -299,6 +299,22 @@ int main(void) {
         CHECK(!lx_busy(&A) && ev_count == 1 && last_ev == LX_EV_DONE && a_i == 1234);
     }
 
+    puts("[23] a refused request doesn't use up a SEQ: a late ACK of the last write can't end the next");
+    {
+        uint8_t f[16]; size_t n;
+        setup(); lx_tick(&A, 0);
+        CHECK(lx_write(&A, LX_BIT(0)) == LX_OK);
+        uint8_t s1 = A.p_seq;
+        for (int i = 0; i < 15; i++)                            /* 15 + 1 used to wrap SEQ back to s1 */
+            CHECK((i & 1 ? lx_read(&A, 0) : lx_write(&A, LX_BIT(0))) == LX_ERR_BUSY);
+        pump(); CHECK(!lx_busy(&A) && ev_count == 1);
+        a2b.drop_next = 1;                                      /* the next request is lost */
+        CHECK(lx_write(&A, LX_BIT(1)) == LX_OK); pump();
+        CHECK(A.p_seq == ((s1 + 1u) & 0x0Fu));
+        n = head_b2a(f, 7, s1, 0); inject(&b2a, f, n); pump();  /* duplicate ACK of the first write */
+        CHECK(lx_busy(&A) && ev_count == 1);
+    }
+
 #if defined(LX_PORT) && !LX_ISR_SAFE
     puts("[18] races: an answer lands the instant lx_tick leaves its critical section");
     {

@@ -225,14 +225,16 @@ static int do_publish(lx_t *h, uint32_t mask BUS_P)
     return LX_OK;
 }
 
-/* Returns the new transaction's SEQ, or LX_ERR_BUSY. */
+/* Returns the new transaction's SEQ, or LX_ERR_BUSY. A refused request must
+ * not use up a SEQ, or retrying while busy could give the next transaction
+ * the previous one's SEQ, and a late answer to that one would end it. */
 static int start_txn(lx_t *h, uint8_t cmd, uint32_t mask BUS_P)
 {
-    uint8_t seq = h->seq = (uint8_t)((h->seq + 1u) & 0x0Fu);
+    uint8_t seq = (uint8_t)((h->seq + 1u) & 0x0Fu);
     LX_ENTER_CRITICAL();
     uint8_t cur = LX_LOAD8(&h->p_cmd);   /* finish() clears it outside the lock */
     if (cur && !(LX_ONE_CONTEXT && cur == P_CLOSING)) { LX_EXIT_CRITICAL(); return LX_ERR_BUSY; }
-    LX_STORE8(&h->p_cmd, cmd); h->p_mask = mask; h->p_seq = seq;
+    LX_STORE8(&h->p_cmd, cmd); h->p_mask = mask; h->p_seq = h->seq = seq;
 #if LX_BUS
     h->p_dst = dst;
 #endif

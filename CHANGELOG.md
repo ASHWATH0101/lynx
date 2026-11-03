@@ -11,6 +11,11 @@
   arriving while a read was in flight, evaluated `LX_BIT(id)` (undefined behaviour). On x86 the
   shift wraps, so id 34 matched a read of id 2 and ended it with `LX_EV_NACK_ID`. Such responses
   are now ignored. New test [21].
+- **A refused request used up a SEQ**: every `lx_write`/`lx_read` that returned `LX_ERR_BUSY`
+  still advanced the 4-bit sequence number. An app retrying while busy could start its next
+  transaction with the same SEQ as the previous one, and a late or duplicate ACK of the previous
+  request then ended the new one with `LX_EV_DONE`, even if the new request never arrived. The
+  SEQ now advances only when a transaction starts. New test [23].
 
 Code size (`-Os`): Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead of
 up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences). Bus and ISR-safe builds move

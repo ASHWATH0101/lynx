@@ -1,7 +1,8 @@
 /* Concurrency stress test, meant to run under ThreadSanitizer.
  *
  * Node A's RX path runs in its own thread while the main thread drives A's
- * app path (lx_set, lx_write, lx_tick, lx_get). Node B runs in a third
+ * app path (lx_set, lx_write, lx_read, lx_publish, lx_tick, lx_get,
+ * lx_take_updates). Node B runs in a third
  * thread and publishes a counter to A the whole time. 5 % of frames are
  * dropped, so retransmits, timeouts and late ACKs collide constantly.
  *
@@ -11,7 +12,8 @@
  *                   the main thread decodes with lx_poll; no lock at all
  *
  * Checks: every transaction ends with exactly one event, a DONE write really
- * landed on B, values read with lx_get are never torn, no TSan reports.
+ * landed on B, values read with lx_get are never torn and never go back
+ * (whether a publish or a read response brought them), no TSan reports.
  * MIT License (c) 2026 Ashwath */
 #define _POSIX_C_SOURCE 200809L
 #include "../lynx.h"
@@ -26,7 +28,8 @@
 pthread_mutex_t lx_test_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-#define TXNS 2000
+#define TXNS 2000                 /* writes; every 4th round also reads B's counter */
+#define READS (TXNS / 4)
 #define DROP_PERCENT 5
 
 /* ---- thread-safe byte pipes that drop whole frames now and then ---- */
@@ -126,25 +129,30 @@ int main(void)
     pthread_create(&tb, NULL, b_thread, NULL);
 
     long torn = 0, wrong = 0, reads = 0;
-    uint32_t last_cnt = 0;
+    uint32_t last_cnt = 0, ups = 0;
     for (int32_t k = 1; k <= TXNS; k++) {
-        long before = __atomic_load_n(&ev_done, __ATOMIC_RELAXED) + __atomic_load_n(&ev_timeout, __ATOMIC_RELAXED);
-        lx_set(&A, 2, &k);
-        if (lx_write(&A, LX_BIT(2)) != LX_OK) { wrong++; continue; }
-        while (lx_busy(&A)) {
-            lx_poll(&A);
-            lx_tick(&A, now_ms());
-            pair_t p;
-            lx_get(&A, 3, &p);
-            reads++;
-            if (p.hi != ~p.lo) torn++;
-            else if (p.lo < last_cnt) wrong++;          /* B's counter only grows */
-            else last_cnt = p.lo;
-            sched_yield();
+        for (int op = 0; op < (k % 4 ? 1 : 2); op++) {  /* op 0: write a_w, op 1: read B's counter */
+            long before = __atomic_load_n(&ev_done, __ATOMIC_RELAXED) + __atomic_load_n(&ev_timeout, __ATOMIC_RELAXED);
+            if (op == 0) lx_set(&A, 2, &k);
+            if ((op == 0 ? lx_write(&A, LX_BIT(2)) : lx_read(&A, 3)) != LX_OK) { wrong++; continue; }
+            while (lx_busy(&A)) {
+                lx_poll(&A);
+                lx_tick(&A, now_ms());
+                pair_t p;
+                lx_get(&A, 3, &p);
+                ups |= lx_take_updates(&A);
+                reads++;
+                if (p.hi != ~p.lo) torn++;
+                else if (p.lo < last_cnt) wrong++;      /* B's counter only grows */
+                else last_cnt = p.lo;
+                sched_yield();
+            }
+            long after = __atomic_load_n(&ev_done, __ATOMIC_RELAXED) + __atomic_load_n(&ev_timeout, __ATOMIC_RELAXED);
+            if (after != before + 1) wrong++;           /* exactly one event per transaction */
         }
-        long after = __atomic_load_n(&ev_done, __ATOMIC_RELAXED) + __atomic_load_n(&ev_timeout, __ATOMIC_RELAXED);
-        if (after != before + 1) wrong++;               /* exactly one event per transaction */
+        if (k % 5 == 0) lx_publish(&A, LX_BIT(2));      /* app-path send while the RX path replies */
     }
+    if (!(ups & LX_BIT(3))) wrong++;                    /* B's counter was committed and flagged */
 
     __atomic_store_n(&stop, 1, __ATOMIC_RELEASE);
     pthread_join(ta, NULL);
@@ -152,10 +160,10 @@ int main(void)
     lx_poll(&B);
 
     long done = ev_done, timeout = ev_timeout;
-    int ok = torn == 0 && wrong == 0 && ev_other == 0 && done + timeout == TXNS && done > TXNS / 2;
+    int ok = torn == 0 && wrong == 0 && ev_other == 0 && done + timeout == TXNS + READS && done > TXNS / 2;
     /* the last DONE write must be on B; a final TIMEOUT may or may not have landed */
-    printf("%s: %d writes: %ld done, %ld timeout | %ld lx_get reads, torn %ld | wrong %ld | A retx %u%s\n",
-           LX_ISR_SAFE ? "ISR-safe queue" : "locked RX thread", TXNS, done, timeout, reads, torn, wrong,
+    printf("%s: %d writes + %d reads: %ld done, %ld timeout | %ld lx_get reads, torn %ld | wrong %ld | A retx %u%s\n",
+           LX_ISR_SAFE ? "ISR-safe queue" : "locked RX thread", TXNS, READS, done, timeout, reads, torn, wrong,
            (unsigned)A.st_retx, ok ? "" : "  <-- FAILED");
     if (b_w < TXNS - 1) { printf("B ended at %d\n", b_w); ok = 0; }
     return ok ? 0 : 1;

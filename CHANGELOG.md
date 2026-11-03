@@ -11,10 +11,56 @@
   arriving while a read was in flight, evaluated `LX_BIT(id)` (undefined behaviour). On x86 the
   shift wraps, so id 34 matched a read of id 2 and ended it with `LX_EV_NACK_ID`. Such responses
   are now ignored. New test [21].
+- **A refused request used up a SEQ**: every `lx_write`/`lx_read` that returned `LX_ERR_BUSY`
+  still advanced the 4-bit sequence number. An app retrying while busy could start its next
+  transaction with the same SEQ as the previous one, and a late or duplicate ACK of the previous
+  request then ended the new one with `LX_EV_DONE`, even if the new request never arrived. The
+  SEQ now advances only when a transaction starts. New test [23].
+- **Buffer overflow when rebinding a variable in flight**: a batch is sized once, at `lx_write`,
+  but `lx_tick` rebuilds each retransmission from the current bindings. Rebinding a variable of
+  the transaction to a larger size made the retransmission overrun `tx_buf` (by 7 bytes with the
+  default `LX_MAX_PAYLOAD`, more with several or larger variables, up to past the end of the
+  handle). `lx_bind` now returns `LX_ERR_BUSY` for an id that is part of the transaction in
+  flight. New test [22].
+- **`LX_RETRIES` above 255 never timed out**: the retry counter is 8 bits, so the transaction
+  was retransmitted forever, no event came and `lx_busy()` stayed true. Such values are now a
+  compile-time error like the other invalid options, and `tools/run_tests.sh` checks that every
+  invalid configuration is rejected.
 
-Code size (`-Os`): Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead of
-up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences). Bus and ISR-safe builds move
-the same way.
+### Changed
+- `lx_bind` returns `LX_ERR_BUSY` for an id that is part of the transaction in flight (see above),
+  also when only the pointer changes.
+
+### Documentation
+- The concurrency contract listed `lx_bind` and `lx_set_addr` among the calls that may run while
+  the RX path decodes in another context. They write the bindings and address that path reads
+  without the lock (a rebind could pair a new pointer with an old size), so `lynx.h` and the
+  README now say to make the setup calls before the RX side starts. Also spelled out: with
+  critical-section hooks the event callback may run in the RX context and must not call
+  app-path functions (`lx_publish` from there raced the app task on `tx_buf`).
+
+### Tests
+- `test/fuzz_frames.c`, run by `tools/run_tests.sh` in every configuration: random frames with a
+  valid CRC (any command, SEQ, id, length, batch layout, bus addresses) mixed with random app
+  calls, rebinds and transactions chained from the callback, checking the protocol invariants
+  under ASan/UBSan. The older fuzz tests rarely get a frame past the CRC; this one finds the
+  `READ_RSP` shift bug above in under a millisecond. Also builds as a libFuzzer target.
+- New tests [22]–[24]: rebinding in flight, SEQ after refused requests, and the largest frame
+  (`LX_MAX_PAYLOAD` bytes without zeros: one full 254-byte COBS block at 250).
+- `tools/run_tests.sh` also runs the suite with `LX_MAX_VARS=8`/`LX_MAX_PAYLOAD=250` and with
+  bus + ISR-safe at 248, and checks that invalid configurations fail to compile.
+- The ThreadSanitizer stress test also runs reads, app-side publishes and `lx_take_updates`
+  against the RX thread.
+
+### Code size
+`-Os` `.text`, wire format and `sizeof(lx_t)` unchanged:
+- `p_cmd` race fix: Cortex-M3 −44 B, Cortex-M0+ −50 B (each section reads `p_cmd` once instead
+  of up to three times); ESP32 +20 B, ESP32-C3 +36 B (acquire fences).
+- Since then: Cortex-M3 +14 B, Cortex-M0+ +16 B, ESP32 +15 B, ESP32-S3 +19 B, ESP32-C3 +18 B
+  (default build; bus and ISR-safe builds +12 to +29 B). The `lx_bind` check costs 26–32 B; folding
+  the payload check into `batch_size` saves 12–14 B. Measured with the CI toolchains (Ubuntu
+  arm-none-eabi-gcc 13.2, Espressif esp-16.1.0_20260609); the tables in the README and
+  `docs/sizes.md` were made with arm-none-eabi-gcc 14.2.1 and are not regenerated here.
 
 ## 0.1.0 — 2026-11-02
 

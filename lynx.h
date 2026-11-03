@@ -45,7 +45,7 @@ extern "C" {
                                    eat the next frame. 0 = lose at most one. */
 #endif
 #ifndef LX_RETRIES
-#define LX_RETRIES      3u      /* automatic retransmissions */
+#define LX_RETRIES      3u      /* automatic retransmissions, <= 255 */
 #endif
 #ifndef LX_BUS
 #define LX_BUS          0       /* 1 = multi-drop bus: +2 address bytes/frame,
@@ -83,6 +83,9 @@ extern "C" {
 #endif
 #if LX_MAX_PAYLOAD > 250u
 #error "LX_MAX_PAYLOAD must be <= 250"
+#endif
+#if LX_RETRIES > 255u
+#error "LX_RETRIES must be <= 255"
 #endif
 #if LX_BUS && LX_MAX_PAYLOAD > 248u
 #error "LX_MAX_PAYLOAD must be <= 248 with LX_BUS"
@@ -181,6 +184,8 @@ typedef struct {
 } lx_t;
 
 void lx_init(lx_t *h, lx_tx_fn tx, lx_event_fn ev, void *ctx);
+/* Bind id (0..LX_MAX_VARS-1) to `size` bytes at `ptr`. LX_ERR_BUSY while id
+ * is part of the transaction in flight: a retransmission resends it. */
 int  lx_bind(lx_t *h, uint8_t id, void *ptr, uint8_t size);
 
 /* Concurrency. Two contexts may use a handle at the same time:
@@ -188,12 +193,15 @@ int  lx_bind(lx_t *h, uint8_t id, void *ptr, uint8_t size);
  *  - the app path: every other lx_* call, all from ONE task.
  * LX_ENTER/EXIT_CRITICAL guard what they share: the transaction in flight,
  * the update flags and the bound variables (use lx_get / lx_set for a
- * variable the other context writes or sends). Each transaction ends with
- * exactly one event: DONE or NACK from the RX path, TIMEOUT from lx_tick,
- * and lx_busy() stays true until that callback has returned.
+ * variable the other context writes or sends). They don't guard the setup:
+ * call lx_init, lx_bind and lx_set_addr before an RX path in another context
+ * starts decoding. Each transaction ends with exactly one event: DONE or
+ * NACK from the RX path, TIMEOUT from lx_tick, and lx_busy() stays true
+ * until that callback has returned.
  * tx() is called from both paths and must keep each call's bytes together on
  * the wire. Without critical-section hooks (one context) the callback may
- * start the next transaction; with hooks, start it after the callback.
+ * start the next transaction. With hooks it may run in the RX context, so it
+ * must not call app-path functions: start the next transaction after it.
  * With LX_ISR_SAFE and lx_poll() called from the app task, everything but
  * the byte queue runs in that task: no hooks needed. */
 

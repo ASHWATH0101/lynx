@@ -120,14 +120,18 @@ static inline void enc_hdr(enc_t *e, const lx_t *h, uint8_t hdr BUS_P)
 #endif
 }
 
-/* Validate mask, return payload bytes needed (or <0 error). */
+/* id is in range (checked first: no shift past 31) and bound */
+#define IS_BOUND(h, id)  ((id) < LX_MAX_VARS && ((h)->bound & LX_BIT(id)))
+
+/* Validate mask, return payload bytes needed (or <0 error). A single
+ * variable always fits: lx_bind caps it at LX_MAX_PAYLOAD. */
 static int batch_size(const lx_t *h, uint32_t mask)
 {
     if (!mask || (mask & ~h->bound)) return LX_ERR_ID;
     if (!(mask & (mask - 1u))) return h->vars[ctz32(mask)].size;
     int n = 0;
     for (uint32_t m = mask; m; m &= m - 1u) n += 2 + h->vars[ctz32(m)].size;
-    return n;
+    return n > (int)LX_MAX_PAYLOAD ? LX_ERR_SIZE : n;
 }
 
 /* cmd is the single-var command; batch uses cmd+1. */
@@ -183,6 +187,9 @@ int lx_bind(lx_t *h, uint8_t id, void *ptr, uint8_t size)
 {
     if (id >= LX_MAX_VARS || !ptr || !size) return LX_ERR_ID;
     if (size > LX_MAX_PAYLOAD) return LX_ERR_SIZE;
+    /* lx_tick rebuilds a retransmission from the bindings: a larger size
+     * there would overflow tx_buf (the batch was sized at lx_write) */
+    if (lx_busy(h) && (h->p_mask & LX_BIT(id))) return LX_ERR_BUSY;
     h->vars[id].ptr = ptr;
     h->vars[id].size = size;
     h->bound |= LX_BIT(id);
@@ -200,7 +207,7 @@ uint32_t lx_take_updates(lx_t *h)
 
 int lx_get(lx_t *h, uint8_t id, void *out)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_ERR_ID;
+    if (!IS_BOUND(h, id)) return LX_ERR_ID;
     LX_ENTER_CRITICAL();
     memcpy(out, h->vars[id].ptr, h->vars[id].size);
     LX_EXIT_CRITICAL();
@@ -209,7 +216,7 @@ int lx_get(lx_t *h, uint8_t id, void *out)
 
 int lx_set(lx_t *h, uint8_t id, const void *in)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_ERR_ID;
+    if (!IS_BOUND(h, id)) return LX_ERR_ID;
     LX_ENTER_CRITICAL();
     memcpy(h->vars[id].ptr, in, h->vars[id].size);
     LX_EXIT_CRITICAL();
@@ -220,19 +227,20 @@ static int do_publish(lx_t *h, uint32_t mask BUS_P)
 {
     int n = batch_size(h, mask);
     if (n < 0) return n;
-    if (n > (int)LX_MAX_PAYLOAD) return LX_ERR_SIZE;
     send(h, &h->st_tx, h->tx_buf, build_vars(h, h->tx_buf, CMD_PUB, 0, mask BUS_A(dst)));
     return LX_OK;
 }
 
-/* Returns the new transaction's SEQ, or LX_ERR_BUSY. */
+/* Returns the new transaction's SEQ, or LX_ERR_BUSY. A refused request must
+ * not use up a SEQ, or retrying while busy could give the next transaction
+ * the previous one's SEQ, and a late answer to that one would end it. */
 static int start_txn(lx_t *h, uint8_t cmd, uint32_t mask BUS_P)
 {
-    uint8_t seq = h->seq = (uint8_t)((h->seq + 1u) & 0x0Fu);
+    uint8_t seq = (uint8_t)((h->seq + 1u) & 0x0Fu);
     LX_ENTER_CRITICAL();
     uint8_t cur = LX_LOAD8(&h->p_cmd);   /* finish() clears it outside the lock */
     if (cur && !(LX_ONE_CONTEXT && cur == P_CLOSING)) { LX_EXIT_CRITICAL(); return LX_ERR_BUSY; }
-    LX_STORE8(&h->p_cmd, cmd); h->p_mask = mask; h->p_seq = seq;
+    LX_STORE8(&h->p_cmd, cmd); h->p_mask = mask; h->p_seq = h->seq = seq;
 #if LX_BUS
     h->p_dst = dst;
 #endif
@@ -261,7 +269,6 @@ static int do_write(lx_t *h, uint32_t mask BUS_P)
 {
     int n = batch_size(h, mask);
     if (n < 0) return n;
-    if (n > (int)LX_MAX_PAYLOAD) return LX_ERR_SIZE;
     int seq = start_txn(h, CMD_WRITE, mask BUS_A(dst));
     if (seq < 0) return seq;
     transmit(h, CMD_WRITE, (uint8_t)seq, mask BUS_A(dst));
@@ -270,7 +277,7 @@ static int do_write(lx_t *h, uint32_t mask BUS_P)
 
 static int do_read(lx_t *h, uint8_t id BUS_P)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_ERR_ID;
+    if (!IS_BOUND(h, id)) return LX_ERR_ID;
     int seq = start_txn(h, CMD_READ, LX_BIT(id) BUS_A(dst));
     if (seq < 0) return seq;
     transmit(h, CMD_READ, (uint8_t)seq, LX_BIT(id) BUS_A(dst));
@@ -389,7 +396,7 @@ static inline void commit(lx_t *h, uint8_t id, const uint8_t *src)
 /* 0 = ok, else NACK reason event code */
 static int check_var(const lx_t *h, uint8_t id, uint8_t len)
 {
-    if (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) return LX_EV_NACK_ID;
+    if (!IS_BOUND(h, id)) return LX_EV_NACK_ID;
     if (len != h->vars[id].size) return LX_EV_NACK_SIZE;
     return 0;
 }
@@ -444,7 +451,7 @@ static void on_frame(lx_t *h, const uint8_t *f, uint8_t n)
     }
 
     case CMD_READ:
-        err = (id >= LX_MAX_VARS || !(h->bound & LX_BIT(id))) ? LX_EV_NACK_ID
+        err = !IS_BOUND(h, id) ? LX_EV_NACK_ID
             : (plen ? LX_EV_NACK_SIZE : 0);
         if (err) {
             reply(h, CMD_NACK, seq, id, err BUS_A(src));

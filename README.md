@@ -107,7 +107,7 @@ totalling 13 bytes in one batch are 27 + 6 = 33 bytes; a 4-byte publish is 10 by
 | Call | |
 |---|---|
 | `lx_init(h, tx, ev, ctx)` | `tx(ctx, data, len)` sends bytes; `ev(ctx, event, mask)` reports transaction results (may be NULL) |
-| `lx_bind(h, id, ptr, size)` | bind variable `id` (0..`LX_MAX_VARS`-1) to `size` bytes at `ptr` |
+| `lx_bind(h, id, ptr, size)` | bind variable `id` (0..`LX_MAX_VARS`-1) to `size` bytes at `ptr`; `LX_ERR_BUSY` while `id` is part of the transaction in flight |
 | `lx_rx(h, byte)`, `lx_rx_buf(h, data, len)` | feed received bytes |
 | `lx_poll(h)` | `LX_ISR_SAFE`: decode what `lx_rx` queued. No-op otherwise, so it is safe to always call |
 | `lx_tick(h, now_ms)` | drives timeouts and retries; call often |
@@ -138,7 +138,7 @@ Compile-time options; set with `-D`, or through Kconfig on ESP-IDF and Zephyr.
 | `LX_MAX_VARS` | 32 | variables per handle, ≤ 32 |
 | `LX_MAX_PAYLOAD` | 64 | bytes per frame, ≤ 250 (≤ 248 with `LX_BUS`); sizes the three frame buffers in `lx_t` |
 | `LX_TIMEOUT_MS` | 20 | wait for ACK / read response |
-| `LX_RETRIES` | 3 | retransmissions before `LX_EV_TIMEOUT` |
+| `LX_RETRIES` | 3 | retransmissions before `LX_EV_TIMEOUT`, ≤ 255 |
 | `LX_LEAD_DELIM` | 0 | also send `0x00` before each frame |
 | `LX_BUS` | 0 | multi-drop bus mode; 0 compiles the bus code out entirely |
 | `LX_ISR_SAFE` | 0 | `lx_rx` only queues; `lx_poll` decodes |
@@ -161,7 +161,10 @@ A handle has two sides: the **RX path** (`lx_rx`, or `lx_poll` with `LX_ISR_SAFE
    (the ESP-IDF and Zephyr ports do). They guard the transaction state, the update flags and the
    bound variables; use `lx_get`/`lx_set` for variables the other side writes or sends. `tx()` is
    then called from both sides and must keep each call's bytes together; from an ISR, `tx()` and
-   `ev()` must be ISR-safe. Example: [`extras/esp-idf/uart_sync`](extras/esp-idf/uart_sync).
+   `ev()` must be ISR-safe. The hooks don't guard the setup: call `lx_init`, `lx_bind` and
+   `lx_set_addr` before the RX side starts. Answers fire the event callback in the RX context, so
+   it must not call app-side functions (`lx_write`, `lx_publish`, ...): signal the app task
+   instead. Example: [`extras/esp-idf/uart_sync`](extras/esp-idf/uart_sync).
 3. **`LX_ISR_SAFE`**: the ISR calls `lx_rx`, which only appends to a lock-free single-producer
    queue (no callbacks, no locks, safe on another core). The app task calls `lx_poll`, so all
    decoding, replies and events happen in that one task and no hooks are needed. If the queue
@@ -256,12 +259,17 @@ tools/size_report.sh [-DLX_BUS=1]   # cross-compile sizes for the toolchains on 
 ```
 
 `run_tests.sh` builds `lynx.c` with `-Wall -Wextra -Werror -Wconversion -Wshadow -pedantic` and
-runs [`test/test_lynx.c`](test/test_lynx.c) under ASan + UBSan in 11 configurations (default,
-lead delimiter, CTZ fallback, bus mode, ISR-safe with 16/128/256-byte queues, and with a test port
-that checks the critical-section contract and fires simulated interrupts at the worst moments).
+runs [`test/test_lynx.c`](test/test_lynx.c) under ASan + UBSan in 13 configurations (default,
+lead delimiter, CTZ fallback, bus mode, ISR-safe with 16/128/256-byte queues, 8 variables with
+250-byte frames, and with a test port that checks the critical-section contract and fires
+simulated interrupts at the worst moments).
 Highlights: 200 000 frames through random bit flips with zero corrupted commits, 2 000 000 bytes
 of noise into the parser, a three-node bus fuzz with zero misrouted commits, ACK / timeout /
-read-response races, queue overflow.
+read-response races, queue overflow, the largest possible frame. In each configuration
+[`test/fuzz_frames.c`](test/fuzz_frames.c) then sends 300 000 random steps of frames that pass the
+CRC (any command, id, length, batch layout, address) and random API calls, checking the protocol
+invariants (`clang -DLIBFUZZER -fsanitize=fuzzer,...` turns it into a libFuzzer target), and
+invalid configurations must fail to compile.
 [`test/test_threads.c`](test/test_threads.c) then runs both nodes in real threads under
 ThreadSanitizer with a lossy link and 2 ms timeouts, and
 [`extras/bench/host/sim.c`](extras/bench/host/sim.c) checks the benchmark harness against wire

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build lynx.c warning-clean and run the host test suite under ASan+UBSan,
-# once per compile-time configuration.
+# Build lynx.c warning-clean and run the host test suite and the CRC-valid
+# frame fuzzer (test/fuzz_frames.c) under ASan+UBSan, once per compile-time
+# configuration.
 #
 #   tools/run_tests.sh            all configs
 #   CC=clang tools/run_tests.sh   another compiler
@@ -23,6 +24,8 @@ CONFIGS=(
   "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=16"
   "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=256 -DLX_BUS=1"
   "-DLX_PORT -I$ROOT/test/port -DLX_ISR_SAFE=1"
+  "-DLX_MAX_VARS=8u -DLX_MAX_PAYLOAD=250u"    # non-default limits; largest frame = one full COBS block
+  "-DLX_BUS=1 -DLX_MAX_PAYLOAD=248u -DLX_ISR_SAFE=1"
 )
 
 for cfg in "${CONFIGS[@]}"; do
@@ -32,14 +35,33 @@ for cfg in "${CONFIGS[@]}"; do
     "$CC" $STRICT -Os $cfg -I"$ROOT" -c "$ROOT/lynx.c" -o "$OUT/strict.o"
     "$CC" $STRICT $SAN $cfg -I"$ROOT" -c "$ROOT/lynx.c" -o "$OUT/lynx.o"
     "$CC" -std=c99 -Wall -Wextra -Werror $SAN $cfg -I"$ROOT" "$OUT/lynx.o" "$ROOT/test/test_lynx.c" -o "$OUT/t"
+    "$CC" -std=c99 -Wall -Wextra -Werror $SAN $cfg -I"$ROOT" "$OUT/lynx.o" "$ROOT/test/fuzz_frames.c" -o "$OUT/fz"
   }
-  if "$OUT/t" > "$OUT/log" 2>&1; then
-    grep -E "delivered|critical sections|PASSED" "$OUT/log"
+  if "$OUT/t" > "$OUT/log" 2>&1 && "$OUT/fz" >> "$OUT/log" 2>&1; then
+    grep -E "delivered|critical sections|CRC-valid|PASSED" "$OUT/log"
   else
     cat "$OUT/log"; echo "FAILED: ${cfg:-default}"; exit 1
   fi
 done
 echo "ALL CONFIGS PASSED"
+
+# Configurations lynx.h must reject with an #error instead of building something broken.
+BAD=(
+  "-DLX_MAX_VARS=33u"
+  "-DLX_MAX_PAYLOAD=251u"
+  "-DLX_BUS=1 -DLX_MAX_PAYLOAD=249u"
+  "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=100u"
+  "-DLX_ISR_SAFE=1 -DLX_RXQ_SIZE=512u"
+  "-DLX_RETRIES=256u"                         # p_tries is 8 bits: would never time out
+)
+for cfg in "${BAD[@]}"; do
+  # shellcheck disable=SC2086
+  if "$CC" -std=c99 $cfg -I"$ROOT" -c "$ROOT/lynx.c" -o "$OUT/bad.o" 2> "$OUT/err"; then
+    echo "FAILED: $cfg compiled"; exit 1
+  fi
+  grep -q "must be" "$OUT/err" || { cat "$OUT/err"; echo "FAILED: $cfg not rejected by its #error"; exit 1; }
+done
+echo "invalid configs rejected: ${#BAD[@]}"
 
 # Real threads under ThreadSanitizer: RX path and app path of one node in
 # different threads, lossy link, short timeouts (test/test_threads.c).
